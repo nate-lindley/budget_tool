@@ -1,0 +1,90 @@
+{% load static %}
+{% load humanize %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Budget Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  </head>
+  <body>
+    <!-- Navbar -->
+    {% include './navbar.html' %}
+
+    <!-- Main Content -->
+    <div class="container mt-5">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Recent Transactions</h2>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTransactionModal">Add Transaction</button>
+      </div>
+
+      {% if transactions %}
+        <div class="my-4">
+          <h4>Transactions</h4>
+          <table class="table table-striped">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Source</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for transaction in transactions %}
+                <tr>
+                  <td>{{ transaction.description }}</td>
+                <td style="color: {% if transaction.amount < 0 %}red{% else %}black{% endif %}">${{ transaction.amount|floatformat:2|intcomma }}</td>
+                  <td>{{ transaction.date }}</td>
+                  <td>{{ transaction.category.name }}</td>
+                  <td>{{ transaction.source.name }}</td>
+                  <td>
+                    <button class="btn btn-sm btn-warning edit-transaction-btn" data-bs-toggle="modal" data-bs-target="#editTransactionModal" data-id="{{ transaction.id }}" data-description="{{ transaction.description }}" data-amount="{{ transaction.amount }}" data-date="{{ transaction.date }}" data-category="{{ transaction.category.id }}" data-source="{{ transaction.source.id }}">Edit</button>
+                    <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_transaction' transaction.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addTransactionModal">Add Transaction</button>
+        </div>
+      {% else %}
+        <p class="text-muted">No transactions to show.</p>
+      {% endif %}
+    </div>
+
+    {% include './modals/add_transaction.html' %}
+  </body>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const editButtons = document.querySelectorAll('.edit-transaction-btn')
+        const form = document.getElementById('editTransactionForm')
+      
+        const description = document.getElementById('editDescription')
+        const amount = document.getElementById('editAmount')
+        const date = document.getElementById('editDate')
+        const category = document.getElementById('editCategory')
+        const source = document.getElementById('editSource')
+      
+        editButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            const id = button.getAttribute('data-id')
+            form.action = `{% url 'edit_transaction' 0 %}`.replace(/0/, id)
+            const date_new = new Date(button.getAttribute('data-date'));
+            const formatted = date_new.toISOString().split('T')[0];
+            console.log(formatted)
+            description.value = button.getAttribute('data-description')
+            amount.value = button.getAttribute('data-amount')
+            date.value = formatted
+            category.value = button.getAttribute('data-category')
+            source.value = button.getAttribute('data-source')
+          })
+        })
+      })
+    </script>
+    {% include './modals/edit_transaction.html' %}
+    {% include './modals/confirm_delete.html' %}
+</html>

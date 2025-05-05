@@ -1,30 +1,54 @@
 from django.shortcuts import render, HttpResponseRedirect
 from .models import *
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.db.models import Sum
 import calendar
 from django.db.models.functions import ExtractYear
 import csv
 from io import TextIOWrapper
+from django.core.paginator import Paginator
+import time
 
 # Create your views here.
 def index(request):
     """
     View function for the index page of the budget tool.
     """
-    # Retrieve 5 most recent transactions from the database to display on the index page
-    # This will fetch the latest 5 transactions from the database
-    transactions = Transaction.objects.all()
+    category_filter = request.GET.get('category')
+    source_filter = request.GET.get('source')
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+
+    transactions_list = Transaction.objects.all().order_by('-date')  # or your preferred ordering
+
+    if category_filter:
+        transactions_list = transactions_list.filter(category__id=category_filter)
+    if source_filter:
+        transactions_list = transactions_list.filter(source__id=source_filter)
+    if start_date:
+        transactions_list = transactions_list.filter(date__gte=start_date)
+    if end_date:
+        transactions_list = transactions_list.filter(date__lte=end_date)
+    
+    paginator = Paginator(transactions_list, 25)  # Show 25 per page
+
+    page_number = request.GET.get('page',1)
+    transactions = paginator.get_page(page_number)
     # Retrieve all categories from the database
     categories = Category.objects.all()  # Get all categories from the database
     sources = Source.objects.all()  # Retrieve all sources from the database, if needed for future use
     # Pass the transactions and categories to the template context
     today = datetime.now().strftime("%Y-%m-%d")  # Get today's date in the format YYYY-MM-DD for any future use in the template
+
     context = {
         'transactions': transactions,  # Pass the latest transactions to the template
         'categories': categories,  # Pass all categories to the template
         'sources': sources,  # Pass all sources to the template, if needed
-        'today': today  # Pass today's date to the template for any future use
+        'today': today,  # Pass today's date to the template for any future use
+        'selected_category': category_filter,
+        'selected_source': source_filter,
+        'start_date': start_date,
+        'end_date': end_date,
     }
     # print(context)
     # Render the index.html template
@@ -70,7 +94,18 @@ def add_transaction(request):
         # This will allow the transaction to be saved without a source
         source = None
     
-    new_transaction = Transaction(description=request.POST['description'],amount=request.POST['amount'],date=request.POST['date'],category=category, source=source)
+    # implement math logic for transaction amount
+    amount = 0
+    if request.POST['amount']:
+        try:
+            amount = float(request.POST['amount'])
+            print(f'Requested amount: {request.POST["amount"]}, Parsed amount: {amount}')
+        except ValueError:
+            # Handle invalid amount input
+            print("Invalid amount value")
+            return HttpResponseRedirect("/")
+
+    new_transaction = Transaction(description=request.POST['description'],amount=amount,date=request.POST['date'],category=category, source=source)
     new_transaction.save()  # Save the new transaction to the database
 
     # Get the referring URL or use a default if it's not available
@@ -136,20 +171,22 @@ def settings_page(request):
     This is a placeholder and will be implemented later.
     """
     categories = Category.objects.all()  # Retrieve all categories from the database
+    total_budget = 0
     for category in categories:
         category.annual_budget = category.budget * 12  # Calculate the annual budget for each category
         category.negative_budget = category.budget * -1
         category.annual_negative_budget = category.annual_budget * -1
+        total_budget += category.budget  # Sum the annual budgets for all categories
     sources = Source.objects.all()
-    transactions = Transaction.objects.all()  # Retrieve all transactions from the database, if needed for future use
     today = datetime.now().strftime("%Y-%m-%d")  # Get today's date in the format YYYY-MM-DD for any future use in the template
-
+    # categories = list(categories)  # Convert the queryset to a list for easier manipulation
+    total = ({'name': 'Total', 'budget': total_budget, 'annual_budget': total_budget*12, 'negative_budget':total_budget*-1, 'annual_negative_budget':total_budget*-12})  # Append the total budget to the categories list
     # Pass the categories and sources to the template context
     context = {
         'categories': categories,  # Pass all categories to the template
         'sources': sources,  # Pass all sources to the template
-        'transactions': transactions,  # Pass all transactions to the template, if needed
-        'today': today  # Pass today's date to the template for any future use
+        'today': today,  # Pass today's date to the template for any future use
+        'total': total
     }
     return render(request, "tracker/settings.html", context)
 
@@ -227,7 +264,13 @@ def edit_transaction(request, transaction_id):
         if 'description' in request.POST and request.POST['description']:
             transaction.description = request.POST['description']
         if 'amount' in request.POST and request.POST['amount']:
-            transaction.amount = request.POST['amount']
+            try:
+                amount = float(request.POST['amount'])
+                transaction.amount = amount  # Update the transaction amount
+            except ValueError:
+            # Handle invalid amount input
+                print(f"Invalid amount value {request.POST['amount']}")
+                return HttpResponseRedirect("/")
         if 'date' in request.POST and is_valid_date(request.POST['date']):
             transaction.date = request.POST['date']
         if 'category' in request.POST:
@@ -284,8 +327,10 @@ def delete_transaction(request, transaction_id):
     """
     View function for deleting an existing transaction.
     """
+    print(f'Deleting transaction id: {transaction_id}')
     try:
         transaction = Transaction.objects.get(id=transaction_id)  # Retrieve the transaction to delete
+        print(f'Deleting transaction: {transaction}')
         transaction.delete()  # Delete the transaction from the database
     except Transaction.DoesNotExist:
         # If the transaction does not exist, redirect to the index page
@@ -311,12 +356,9 @@ def reports_view(request):
     
     transactions = Transaction.objects.filter(date__month=month, date__year=year, amount__lt=0)
 
-    income_total = Transaction.objects.filter(date__month=month, date__year=year, category__name='income').aggregate(total=Sum('amount'))
+    income_total = Transaction.objects.filter(date__month=month, date__year=year, category__name='Income').aggregate(total=Sum('amount'))
 
-    income_total_amount = income_total['total'] if income_total['total'] else 0
-
-    print(income_total_amount)
-    # print(transactions)
+    income_total_amount = float(income_total['total']) if income_total['total'] else 0
     
     # Pie chart data (by category)
     pie_data = transactions.values("category__name").annotate(total=Sum("amount")*-1)
@@ -329,32 +371,110 @@ def reports_view(request):
     )
     cumulative_total = 0
     line_data = [{"date": datetime(year, month, 1).strftime("%Y-%m-%d"), "cumulative": 0}]
+    dates = {}
     for item in daily_totals:
         cumulative_total += item["daily_total"] * -1
-        line_data.append({"date": item["date"].strftime("%Y-%m-%d"), "cumulative": cumulative_total})
-    
+        line_data.append({"date": item["date"].strftime("%Y-%m-%d"), "cumulative": float(cumulative_total)})
+        dates[item["date"].isoformat()] = True
+
+    new_line_data = []
+    for data in line_data:
+        tomorrow = datetime.strptime(data['date'], '%Y-%m-%d') + timedelta(days=1)
+        while (tomorrow.strftime('%Y-%m-%d') not in dates) and tomorrow < datetime(year, month+1, 1):
+            new_line_data.append({"date": tomorrow.strftime('%Y-%m-%d'), 'cumulative': data['cumulative']})
+            dates[tomorrow.isoformat()] = True
+            tomorrow = tomorrow + timedelta(days=1)
+
+    ld_idx = nld_idx = 0
+    final_line_data = []
+    while len(final_line_data) < (len(line_data) + len(new_line_data)):
+        if nld_idx >= len(new_line_data) or (ld_idx < len(line_data) and line_data[ld_idx]['date'] < new_line_data[nld_idx]['date']):
+            final_line_data.append(line_data[ld_idx])
+            ld_idx += 1
+        else:
+            final_line_data.append(new_line_data[nld_idx])
+            nld_idx += 1
+
     total_spent = float(sum([x["total"] for x in pie_data]))
 
     # Convert pie chart data to JSON-safe format
     pie_data_safe = []
+    all_categories = []
     for item in pie_data:
         total = float(item["total"])
         percentage = total / total_spent * 100
         budget = float(Category.objects.get(name=item["category__name"]).budget) if Category.objects.filter(name=item["category__name"]).exists() else 0
-        surplus = abs(budget - total)
+        surplus = budget - total
+        print(item)
+        print(f'Category: {item["category__name"]}, Total: {total}, Percentage: {percentage:.2f}%, Budget: {budget}, Surplus: {surplus}')
+        print()
         pie_data_safe.append({
             "category__name": item["category__name"],
-            "total": total,
-            "percentage": percentage,
-            "budget": budget,
+            "total": abs(total),
+            "percentage": abs(percentage),
+            "budget": abs(budget),
+            "surplus": abs(surplus),
+        })
+        all_categories.append({
+            "category__name": item["category__name"],  
+            "total": abs(total),
+            "percentage": abs(percentage),
+            "budget": abs(budget),
             "surplus": surplus,
+            "is_surplus_negative": surplus < 0,
+            "is_budget_negative": budget < 0,
+            "is_negative": total < 0,
         })
 
+    categories = Category.objects.all()
+
+    total_budget = float(sum(x for x in [cat.budget for cat in categories if cat.budget is not None])) * -1
+
+    for category in categories:
+        if category.name == "Income":
+            continue
+        # Find the category in pie_data_safe and append it
+        for item in pie_data_safe:
+            if item["category__name"] == category.name:
+                break
+        else:
+            # If not found, append with zero values
+            all_categories.append({
+                "category__name": category.name,
+                "total": 0,
+                "percentage": 0,
+                "budget": abs(category.budget),
+                "surplus": abs(category.budget),
+                "is_surplus_negative": category.budget < 0,
+                "is_budget_negative": category.budget < 0,
+                "is_negative": False,
+            })
+
+    all_categories.append({
+        "category__name": "Savings",
+        "total": float(income_total_amount) - total_spent,
+        "percentage": 0,
+        "budget": abs(total_budget),
+        "surplus": -total_budget + (income_total_amount - total_spent),  
+        "is_surplus_negative": total_budget > (income_total_amount - total_spent),
+        "is_budget_negative": False,
+        "is_negative": (float(income_total_amount) - total_spent) < 0,
+    })
+    all_categories.append({
+        "category__name": "Income",
+        "total": abs(float(income_total_amount)),
+        "percentage": 0,
+        "budget": abs(categories.get(name="Income").budget),
+        "surplus": float(categories.get(name="Income").budget) + float(income_total_amount),  
+        "is_surplus_negative": categories.get(name="Income").budget < (-1 *  float(income_total_amount)),
+        "is_budget_negative": False,
+        "is_negative": False,
+    })
 
     # Convert line chart data to JSON-safe format
     line_data_safe = [
         {"date": item["date"], "cumulative": float(item["cumulative"])}
-        for item in line_data
+        for item in final_line_data
     ]
 
     context = {
@@ -364,10 +484,10 @@ def reports_view(request):
         "total_spent": total_spent,
         "pie_data": pie_data_safe,
         "line_data": line_data_safe,
+        "table_data": all_categories,
         "months": [(i, calendar.month_name[i]) for i in range(1, 13)],
         "years": list(year_values),
     }
-
 
     return render(request, "tracker/reports.html", context)
 
@@ -469,3 +589,118 @@ def import_csv_confirm(request):
 
     return HttpResponseRedirect("/")
 
+from django.db.models import Sum, F
+from django.shortcuts import render
+from datetime import datetime
+from calendar import month_name
+from .models import Transaction, Category
+
+def ytd_report(request):
+    year = datetime.now().year
+    current_month = datetime.now().month
+
+    # Transactions for the year
+    transactions = Transaction.objects.filter(date__year=year, date__month__lte=current_month)
+
+    # Total spent per category (excluding income)
+    spending_data = (
+        transactions.exclude(category__name__iexact='income')
+        .values('category__name', 'category__budget')
+        .annotate(total=Sum('amount') * -1)
+    )
+
+    ytd_data = []
+    for entry in spending_data:
+        avg_per_month = entry['total'] / current_month
+        budget = entry['category__budget'] or 0
+        avg_surplus = budget - avg_per_month
+        ytd_data.append({
+            'category__name': entry['category__name'],
+            'total': entry['total'],
+            'avg_per_month': avg_per_month,
+            'budget': budget,
+            'avg_surplus': avg_surplus,
+            'total_surplus': avg_surplus * current_month,
+        })
+
+    # Net savings = income - spending for each month
+    savings_chart_data = []
+    for month in range(1, current_month + 1):
+        income = transactions.filter(
+            date__month=month,
+            category__name__iexact='income'
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        spend = transactions.exclude(
+            category__name__iexact='income'
+        ).filter(date__month=month).aggregate(total=Sum('amount'))['total'] or 0
+
+        savings_chart_data.append({
+            'month': month_name[month][:3],
+            'income': float(round(income, 2)),
+            'spend': float(round(spend, 2)),
+            'savings': float(round(income + spend, 2))
+        })
+
+    print(savings_chart_data)
+    context = {
+        'ytd_data': ytd_data,
+        'savings_chart_data': savings_chart_data
+    }
+
+    return render(request, 'tracker/ytd.html', context)
+
+def mtd_report(request):
+    month = datetime.now().month
+    year = datetime.now().year
+
+    # Transactions for the current month
+    transactions = Transaction.objects.filter(date__year=year, date__month=month)
+
+    # Total spent per category (excluding income)
+    spending_data = (
+        transactions.exclude(category__name__iexact='income')
+        .values('category__name', 'category__budget')
+        .annotate(total=Sum('amount') * -1)
+    )
+
+    mtd_data = []
+    for entry in spending_data:
+        avg_per_month = entry['total'] / month
+        budget = entry['category__budget'] or 0
+        avg_surplus = budget - avg_per_month
+        mtd_data.append({
+            'category__name': entry['category__name'],
+            'total': entry['total'],
+            'avg_per_month': avg_per_month,
+            'budget': budget,
+            'avg_surplus': avg_surplus,
+            'total_surplus': avg_surplus * month,
+        })
+
+    # Net savings = income - spending for each month
+    savings_chart_data = []
+    for day in range(1, 31):  # Assuming 30 days in a month for simplicity
+        income = transactions.filter(
+            date__day=day,
+            category__name__iexact='income'
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        spend = transactions.exclude(
+            category__name__iexact='income'
+        ).filter(date__day=day).aggregate(total=Sum('amount'))['total'] or 0
+
+        savings_chart_data.append({
+            'day': day,
+            'income': float(round(income, 2)),
+            'spend': float(round(spend, 2)),
+            'savings': float(round(income + spend, 2))
+        })
+
+    print(savings_chart_data)
+    context = {
+        'mtd_data': mtd_data,
+        'savings_chart_data': savings_chart_data
+    }
+
+    return render(request, 'tracker/mtd.html', context)

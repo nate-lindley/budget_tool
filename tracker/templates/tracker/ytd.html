@@ -1,0 +1,148 @@
+{% include './navbar.html' %}
+{% load static %}
+{% load humanize %}
+{% load number_formatting %}
+
+<head>
+  <title>Year-to-Date Tracker</title>
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .container {
+      padding: 40px 20px;
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 30px;
+      font-weight: 600;
+    }
+    .ytd-table {
+      margin: auto;
+      width: 90%;
+      border-collapse: collapse;
+      background: #fff;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .ytd-table th,
+    .ytd-table td {
+      padding: 14px 18px;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+    }
+    .ytd-table th {
+      background-color: #f5f5f5;
+      font-weight: 600;
+    }
+    .ytd-table tr:hover {
+      background-color: #f0f0f0;
+    }
+    .chart-card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      padding: 20px;
+      margin-top: 40px;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    #savingsChart {
+      height: 400px !important;
+    }
+  </style>
+</head>
+
+{% block content %}
+  <div class="container">
+    <h2>Year-to-Date Spending Overview</h2>
+    <table class="ytd-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Total Spent</th>
+          <th>Avg per Month</th>
+          <th>Monthly Budget</th>
+          <th>Avg Surplus/Deficit</th>
+          <th>Total Surplus/Deficit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in ytd_data %}
+          <tr>
+            <td>{{ entry.category__name }}</td>
+            <td>{{ entry.total|dollar_format }}</td>
+            <td>{{ entry.avg_per_month|dollar_format }}</td>
+            <td>{{ entry.budget|dollar_format }}</td>
+            <td style="color: {% if entry.avg_surplus < 0 %}
+                red
+              {% else %}
+                green
+              {% endif %};">
+            {{ entry.avg_surplus|dollar_format }}
+            </td>
+            <td style="color: {% if entry.total_surplus < 0 %}
+                red
+              {% else %}
+                green
+              {% endif %};">
+    {{ entry.total_surplus|dollar_format }}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="chart-card">
+      <h5 style="text-align:center; margin-bottom: 20px;">Monthly Net</h5>
+      <canvas id="savingsChart"></canvas>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+  const savingsData = {{ savings_chart_data|safe }};
+
+  new Chart(document.getElementById('savingsChart'), {
+    type: 'bar',
+    data: {
+      labels: savingsData.map(e => e.month),
+      datasets: [{
+        label: 'Net Savings ($)',
+        data: savingsData.map(e => e.savings),
+        backgroundColor: savingsData.map(e => e.savings >= 0 ? '#28a745' : '#dc3545')
+      }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: false
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return `$${context.raw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
+          }
+        },
+        legend: {
+          display: false
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Amount ($)'
+          }
+        }
+      }
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,154 @@
+{% include "./navbar.html" %}
+{% load static %}
+{% load humanize %}
+
+
+<head>
+    <style>
+        select {
+          padding: 8px 12px;
+          border: 1px solid #ccc;
+          border-radius: 8px;
+          font-size: 16px;
+          background-color: white;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+          cursor: pointer;
+          transition: border-color 0.2s, box-shadow 0.2s;
+        }
+      
+        select:hover,
+        select:focus {
+          border-color: #888;
+          box-shadow: 0 0 6px rgba(0, 0, 0, 0.15);
+          outline: none;
+        }
+      
+        form {
+          display: flex;
+          justify-content: center;
+          gap: 10px;
+          margin: 20px 0;
+        }
+        .category-table {
+            margin: 40px auto;
+            width: 60%;
+            border-collapse: collapse;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            font-family: sans-serif;
+          }
+        
+          .category-table th {
+            background-color: #f5f5f5;
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 16px;
+            border-bottom: 1px solid #ddd;
+          }
+        
+          .category-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #eee;
+          }
+        
+          .category-table tr:nth-child(even) {
+            background-color: #fafafa;
+          }
+        
+          .category-table tr:hover {
+            background-color: #f0f0f0;
+          }
+        
+          .highlight-row {
+            background-color: #fffbe6 !important;
+            font-weight: bold;
+          }
+      </style>
+<title>Reports</title>      
+</head>
+{% block content %}
+  <div class="container mt-5">
+    <h2>Reports</h2>
+    <p>Select a month and year to view your spending report.</p>
+  </div>
+<form method="get">
+    <select name="month" onchange="this.form.submit()">
+      {% for num, name in months %}
+        <option value="{{ num }}" {% if num == selected_month %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+    <select name="year" onchange="this.form.submit()">
+        {% for y in years %}
+          <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+    </select>      
+  </form>
+  
+  <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+    <div style="width: 25%;">
+      <canvas id="pieChart"></canvas>
+    </div>
+    <div style="width: 25%;">
+      <canvas id="lineChart"></canvas>
+    </div>
+  </div>
+  <table class="category-table">
+    <thead>
+      <tr>
+        <th>Category</th>
+        <th>Total Spent</th>
+        {% comment %} <th>Percentage</th> {% endcomment %}
+        <th>Budget</th>
+        <th>Surplus/Deficit</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in pie_data|dictsortreversed:"total" %}
+        <tr >
+          <td>{{ entry.category__name }}</td>
+          <td>${{ entry.total|floatformat:2|intcomma }}</td>
+          {% comment %} <td>{{ entry.percentage|floatformat:2 }}%</td> {% endcomment %}
+          <td>${{ entry.budget|floatformat:2|intcomma }}</td>
+            {% if entry.total > entry.budget %}
+                <td style="color: red;">-${{ entry.surplus|floatformat:2|intcomma }}</td>
+            {% else %}
+                <td style="color: green;">${{ entry.surplus|floatformat:2|intcomma }}</td>
+            {% endif %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  
+  
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+  const pieData = {{ pie_data|safe }};
+  const lineData = {{ line_data|safe }};
+  
+  // Pie chart
+  new Chart(document.getElementById('pieChart'), {
+    type: 'pie',
+    data: {
+      labels: pieData.map(e => e.category__name),
+      datasets: [{
+        data: pieData.map(e => e.total),
+      }]
+    }
+  });
+  
+  // Line chart
+  new Chart(document.getElementById('lineChart'), {
+    type: 'line',
+    data: {
+      labels: lineData.map(e => e.date),
+      datasets: [{
+        label: 'Cumulative Spend',
+        data: lineData.map(e => e.cumulative),
+        fill: false,
+      }]
+    }
+  });
+  </script>
+  {% endblock %}

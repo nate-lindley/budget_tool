@@ -1,6 +1,8 @@
 {% include './navbar.html' %}
 {% load static %}
 {% load humanize %}
+{% load number_formatting %}
+<head><title>Settings</title></head>
 
 {% block content %}
   <div class="container mt-5">
@@ -70,6 +72,23 @@
                   </td>
                 </tr>
               {% endfor %}
+                <tr>
+                  <td><strong>Net Monthly Spend</strong></td>
+                  <td>
+                    {% if total.budget >= 0 %}
+                    ${{ total.budget|floatformat:0|intcomma }}
+                    {% else %}
+                    -${{ total.negative_budget|floatformat:0|intcomma }}
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if total.annual_budget >= 0 %}
+                    ${{ total.annual_budget|floatformat:0|intcomma }}
+                    {% else %}
+                    -${{ total.annual_negative_budget|floatformat:0|intcomma }}
+                    {% endif %}
+                  </td>
+                  <td></td>
             {% endif %}
           </tbody>
         </table>

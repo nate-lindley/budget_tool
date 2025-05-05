@@ -14,7 +14,7 @@
                     </div>
                     <div class="mb-3">
                         <label for="editAmount" class="form-label">Amount</label>
-                        <input type="number" step="0.01" class="form-control" id="editAmount" name="amount" required>
+                        <input type="text" class="form-control" id="editAmount" name="amount" required>
                     </div>
                     <div class="mb-3">
                         <label for="editDate" class="form-label">Date</label>
@@ -45,3 +45,30 @@
         </div>
     </div>
 </div>
+<script>
+    document.querySelector('#editTransactionModal form').addEventListener('submit', function(e) {
+      const amountInput = document.getElementById('editAmount');
+      const originalValue = amountInput.value;
+    
+      try {
+        // Only allow safe characters: numbers, + - * / . and spaces
+        if (!/^[\d\s+\-*/.()]+$/.test(originalValue)) {
+          throw new Error("Invalid characters in amount.");
+        }
+    
+        // Safely evaluate the expression
+        const evaluated = Function('"use strict"; return (' + originalValue + ')')();
+    
+        if (isNaN(evaluated) || !isFinite(evaluated)) {
+          throw new Error("Invalid math expression.");
+        }
+    
+        // Round to 2 decimal places and set it
+        amountInput.value = parseFloat(evaluated).toFixed(2);
+      } catch (error) {
+        e.preventDefault();
+        alert("Please enter a valid math expression for the amount.");
+      }
+    });
+    </script>
+    
