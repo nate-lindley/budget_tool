@@ -10,6 +10,17 @@
     <h2>Year-to-Date Spending Overview</h2>
   </div>
 
+  <div class="charts-row">
+    <div class="chart-card">
+      <h5>Monthly Net</h5>
+      <canvas id="savingsChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <h5>YTD Spend by Category</h5>
+      <canvas id="categoryPieChart"></canvas>
+    </div>
+  </div>
+
   <div class="table-wrapper">
     <table class="data-table ytd-table">
       <thead>
@@ -52,7 +63,7 @@
             {{ total_data.total_surplus|dollar_format }}
           </td>
         </tr>
-        <tr>
+        <tr class="clickable-row" data-href="/category_year/?category={{ income_data.category__id }}&year={{ year }}">
           <td>{{ income_data.category__name }}</td>
           <td>{{ income_data.total|dollar_format }}</td>
           <td>{{ income_data.annual_budget|dollar_format }}</td>
@@ -80,17 +91,6 @@
         </tr>
       </tbody>
     </table>
-  </div>
-
-  <div class="charts-row">
-    <div class="chart-card">
-      <h5>Monthly Net</h5>
-      <canvas id="savingsChart"></canvas>
-    </div>
-    <div class="chart-card">
-      <h5>YTD Spend by Category</h5>
-      <canvas id="categoryPieChart"></canvas>
-    </div>
   </div>
 {% endblock %}
 
@@ -134,6 +134,10 @@
       },
       options: {
         maintainAspectRatio: false,
+        animation: {
+          duration: 900,
+          easing: 'easeOutCubic'
+        },
         plugins: {
           title: {
             display: false
@@ -172,6 +176,10 @@
       },
       options: {
         maintainAspectRatio: false,
+        animation: {
+          duration: 900,
+          easing: 'easeOutCubic'
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
