@@ -3,7 +3,7 @@ from .models import *
 from datetime import datetime, timedelta
 from django.db.models import Sum
 import calendar
-from django.db.models.functions import ExtractYear
+from django.db.models.functions import ExtractYear, ExtractMonth
 import csv
 from io import TextIOWrapper
 from django.core.paginator import Paginator
@@ -646,7 +646,7 @@ def ytd_report(request):
     # Total spent per category (excluding income)
     spending_data = (
         transactions.exclude(category__name__iexact='income')
-        .values('category__name', 'category__budget')
+        .values('category__name', 'category__budget', 'category__id')
         .annotate(total=Sum('amount') * -1)
     )
 
@@ -659,12 +659,14 @@ def ytd_report(request):
     ytd_data = []
     total_spend = 0
     total_budget = 0
+    category_pie_data = []
     for entry in spending_data:
         avg_per_month = entry['total'] / current_month
         budget = entry['category__budget'] or 0
         avg_surplus = budget - avg_per_month
         ytd_data.append({
             'category__name': entry['category__name'],
+            'category__id': entry['category__id'],
             'total': entry['total'],
             'annual_budget': entry['category__budget'] * 12 if entry['category__budget'] else 0,
             'avg_per_month': avg_per_month,
@@ -672,8 +674,17 @@ def ytd_report(request):
             'avg_surplus': avg_surplus,
             'total_surplus': avg_surplus * current_month,
         })
+        category_pie_data.append({
+            "label": entry["category__name"],
+            "total": float(entry["total"]),
+            "category_id": entry["category__id"],
+        })
         total_spend += avg_per_month
         total_budget += budget
+
+    # Sort data by total spend descending for consistent display
+    ytd_data = sorted(ytd_data, key=lambda x: x["total"], reverse=True)
+    category_pie_data = sorted(category_pie_data, key=lambda x: x["total"], reverse=True)
 
     total_data = {
         'category__name': 'Total Spend',
@@ -744,7 +755,9 @@ def ytd_report(request):
         'savings_chart_data': savings_chart_data,
         'total_data': total_data,
         'income_data': income_data,
-        'savings_data': savings_data
+        'savings_data': savings_data,
+        'year': year,
+        'category_pie_data': category_pie_data,
     }
 
     return render(request, 'tracker/ytd.html', context)
@@ -803,3 +816,55 @@ def mtd_report(request):
     }
 
     return render(request, 'tracker/mtd.html', context)
+
+
+def category_year_view(request):
+    """
+    Display a bar chart of a single category's monthly totals for the selected year.
+    """
+    categories = Category.objects.all().order_by('name')
+    current_year = datetime.now().year
+    year_values = (
+        Transaction.objects.annotate(year=ExtractYear("date"))
+        .values_list("year", flat=True)
+        .distinct()
+        .order_by("year")
+    )
+    years = list(year_values) or [current_year]
+    year = int(request.GET.get("year", years[-1] if years else current_year))
+
+    # Default to first non-income category if none chosen
+    default_category = categories.exclude(name__iexact="income").first() or categories.first()
+    category_id = request.GET.get("category") or (default_category.id if default_category else None)
+
+    monthly_totals = [0 for _ in range(12)]
+    selected_category = None
+
+    if category_id:
+        try:
+            selected_category = Category.objects.get(id=category_id)
+            monthly_data = (
+                Transaction.objects.filter(category=selected_category, date__year=year)
+                .annotate(month=ExtractMonth("date"))
+                .values("month")
+                .annotate(total=Sum("amount"))
+            )
+            for entry in monthly_data:
+                month_idx = int(entry["month"]) - 1
+                monthly_totals[month_idx] = abs(float(entry["total"])) if entry["total"] else 0
+        except Category.DoesNotExist:
+            selected_category = None
+
+    context = {
+        "categories": categories,
+        "selected_category": selected_category,
+        "selected_category_id": int(category_id) if category_id else None,
+        "year": year,
+        "years": years,
+        "month_labels": [calendar.month_abbr[i] for i in range(1, 13)],
+        "monthly_totals": monthly_totals,
+        "total_for_year": sum(monthly_totals),
+        "average_per_month": (sum(monthly_totals) / 12) if monthly_totals else 0,
+    }
+
+    return render(request, "tracker/category_year.html", context)

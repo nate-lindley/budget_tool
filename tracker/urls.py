@@ -18,4 +18,5 @@ urlpatterns = [
     path("import-confirm/", views.import_csv_confirm, name="import_csv_confirm"),
     path("ytd_report/", views.ytd_report, name="ytd_report"),
     path("/mtd_report/", views.mtd_report, name="mtd_report"),
+    path("category_year/", views.category_year_view, name="category_year"),
 ]

@@ -1,0 +1,179 @@
+{% include "./navbar.html" %}
+{% load humanize %}
+
+<head>
+  <title>Category by Year</title>
+  <style>
+    body {
+      background: radial-gradient(circle at 20% 20%, #f4f7fb 0, #eef1f6 25%, #e6ebf3 60%, #dee5f0 100%);
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 40px auto;
+      padding: 0 20px 40px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .header h2 {
+      margin: 0 0 8px 0;
+      font-size: 28px;
+    }
+
+    .filters {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+
+    .filters select {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid #cfd4dc;
+      background: #fff;
+      min-width: 180px;
+      box-shadow: 0 8px 24px rgba(31, 38, 135, 0.08);
+    }
+
+    .chart-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(31, 38, 135, 0.15);
+      border: 1px solid #e4e9f2;
+    }
+
+    .summary {
+      text-align: center;
+      margin-top: 16px;
+      color: #334155;
+      font-weight: 600;
+    }
+
+    #categoryChart {
+      max-height: 420px;
+    }
+  </style>
+</head>
+
+{% block content %}
+<div class="container">
+  <div class="header">
+    <h2>Category Spend by Month</h2>
+    <p>Select a category to see how it trends through the year.</p>
+  </div>
+
+  <form method="get" class="filters">
+    <select name="category" onchange="this.form.submit()">
+      {% for category in categories %}
+        <option value="{{ category.id }}" {% if category.id == selected_category_id %}selected{% endif %}>
+          {{ category.name }}
+        </option>
+      {% endfor %}
+    </select>
+    <select name="year" onchange="this.form.submit()">
+      {% for y in years %}
+        <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <div class="chart-card">
+    {% if selected_category %}
+      <canvas id="categoryChart"></canvas>
+      <div class="summary">
+        {{ selected_category.name }} total for {{ year }}:
+        ${{ total_for_year|floatformat:2|intcomma }}
+        &nbsp;•&nbsp;
+        Monthly average: ${{ average_per_month|floatformat:2|intcomma }}
+      </div>
+    {% else %}
+      <p style="text-align:center; margin: 0;">Choose a category to view the chart.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const monthLabels = {{ month_labels|safe }};
+  const monthlyTotals = {{ monthly_totals|safe }};
+  const selectedYear = {{ year }};
+  const selectedCategoryId = {{ selected_category_id|default:"null" }};
+
+  {% if selected_category %}
+  const categoryCtx = document.getElementById('categoryChart');
+  const riseFromZero = (ctx) => ctx.chart.scales.y.getPixelForValue(0);
+  const barDelay = (ctx) => {
+    if (ctx.type !== 'data') return 150;
+    return 150 + ctx.dataIndex * 60;
+  };
+
+  new Chart(categoryCtx, {
+    type: 'bar',
+    data: {
+      labels: monthLabels,
+      datasets: [{
+        label: '{{ selected_category.name|escapejs }}',
+        data: monthlyTotals,
+        backgroundColor: monthLabels.map((_, idx) => `hsl(${idx * 30}, 70%, 60%)`),
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Monthly Totals',
+          padding: {
+            bottom: 12
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `$${Number(ctx.raw || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+          }
+        },
+        legend: { display: false }
+      },
+      animation: {
+        duration: 900,
+        easing: 'easeOutCubic',
+        delay: barDelay
+      },
+      animations: {
+        y: {
+          from: riseFromZero,
+          duration: 900,
+          easing: 'easeOutCubic'
+        }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'Amount ($)' }
+        }
+      },
+      onClick: (evt, elements) => {
+        if (!elements.length || selectedCategoryId === null) return;
+        const barIndex = elements[0].index;
+        const month = barIndex + 1;
+        const start = `${selectedYear}-${String(month).padStart(2, '0')}-01`;
+        const lastDay = new Date(selectedYear, month, 0).getDate();
+        const end = `${selectedYear}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        const url = `/?category=${selectedCategoryId}&start_date=${start}&end_date=${end}`;
+        window.location.href = url;
+      }
+    }
+  });
+  {% endif %}
+</script>
+{% endblock %}

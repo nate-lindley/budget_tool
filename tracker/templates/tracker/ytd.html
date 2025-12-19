@@ -40,18 +40,28 @@
     .ytd-table tr:hover {
       background-color: #f0f0f0;
     }
+    .clickable-row {
+      cursor: pointer;
+    }
     .chart-card {
       background: #fff;
       border-radius: 12px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
       padding: 20px;
-      margin-top: 40px;
-      max-width: 800px;
-      margin-left: auto;
-      margin-right: auto;
+      flex: 1;
+      min-width: 320px;
     }
     #savingsChart {
       height: 400px !important;
+    }
+    #categoryPieChart {
+      height: 400px !important;
+    }
+    .charts-row {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-top: 40px;
     }
   </style>
 </head>
@@ -73,7 +83,7 @@
       </thead>
       <tbody>
         {% for entry in ytd_data %}
-          <tr>
+          <tr {% if entry.category__id %}class="clickable-row" data-href="/category_year/?category={{ entry.category__id }}&year={{ year }}"{% endif %}>
             <td>{{ entry.category__name }}</td>
             <td>{{ entry.total|dollar_format }}</td>
             <td>{{ entry.annual_budget|dollar_format }}</td>
@@ -162,15 +172,27 @@
       </tbody>
     </table>
 
-    <div class="chart-card">
-      <h5 style="text-align:center; margin-bottom: 20px;">Monthly Net</h5>
-      <canvas id="savingsChart"></canvas>
+    <div class="charts-row">
+      <div class="chart-card">
+        <h5 style="text-align:center; margin-bottom: 20px;">Monthly Net</h5>
+        <canvas id="savingsChart"></canvas>
+      </div>
+      <div class="chart-card">
+        <h5 style="text-align:center; margin-bottom: 20px;">YTD Spend by Category</h5>
+        <canvas id="categoryPieChart"></canvas>
+      </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
     const savingsData = {{ savings_chart_data|safe }};
+    const categoryPieData = {{ category_pie_data|safe }};
+    document.querySelectorAll('.clickable-row').forEach(row => {
+      row.addEventListener('click', () => {
+        window.location.href = row.dataset.href;
+      });
+    });
   
     new Chart(document.getElementById('savingsChart'), {
       type: 'bar',
@@ -224,6 +246,39 @@
               text: 'Amount ($)'
             }
           }
+        }
+      }
+    });
+
+    new Chart(document.getElementById('categoryPieChart'), {
+      type: 'pie',
+      data: {
+        labels: categoryPieData.map(e => e.label),
+        datasets: [{
+          data: categoryPieData.map(e => e.total),
+          backgroundColor: categoryPieData.map((_, idx) => `hsl(${idx * 35}, 65%, 65%)`)
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const value = context.raw || 0;
+                const label = context.label || '';
+                return `${label}: $${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              }
+            }
+          }
+        },
+        onClick: (evt, elements) => {
+          if (!elements.length) return;
+          const idx = elements[0].index;
+          const slice = categoryPieData[idx];
+          if (!slice.category_id) return;
+          window.location.href = `/category_year/?category=${slice.category_id}&year={{ year }}`;
         }
       }
     });
