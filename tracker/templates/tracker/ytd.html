@@ -64,6 +64,7 @@
         <tr>
           <th>Category</th>
           <th>Total Spent</th>
+          <th>Annual Budget</th>
           <th>Avg per Month</th>
           <th>Monthly Budget</th>
           <th>Avg Surplus/Deficit</th>
@@ -75,6 +76,7 @@
           <tr>
             <td>{{ entry.category__name }}</td>
             <td>{{ entry.total|dollar_format }}</td>
+            <td>{{ entry.annual_budget|dollar_format }}</td>
             <td>{{ entry.avg_per_month|dollar_format }}</td>
             <td>{{ entry.budget|dollar_format }}</td>
             <td style="color: {% if entry.avg_surplus < 0 %}
@@ -93,6 +95,70 @@
             </td>
           </tr>
         {% endfor %}
+        <tr style="font-weight: bold;">
+          <td>{{ total_data.category__name }}</td>
+          <td>{{ total_data.total|dollar_format }}</td>
+          <td>{{ total_data.annual_budget|dollar_format }}</td>
+          <td>{{ total_data.avg_per_month|dollar_format }}</td>
+          <td>{{ total_data.budget|dollar_format }}</td>
+          <td style="color: {% if total_data.avg_surplus < 0 %}
+              red
+            {% else %}
+              green
+            {% endif %};">
+          {{ total_data.avg_surplus|dollar_format }}
+          </td>
+          <td style="color: {% if total_data.total_surplus < 0 %}
+              red
+            {% else %}
+              green
+            {% endif %};">
+  {{ total_data.total_surplus|dollar_format }}
+          </td>
+        </tr>
+        <tr>
+          <td>{{ income_data.category__name }}</td>
+          <td>{{ income_data.total|dollar_format }}</td>
+          <td>{{ income_data.annual_budget|dollar_format }}</td>
+          <td>{{ income_data.avg_per_month|dollar_format }}</td>
+          <td>{{ income_data.budget|dollar_format }}</td>
+          <td style="color: {% if income_data.avg_surplus < 0 %}
+              red
+            {% else %}
+              green
+            {% endif %};">
+          {{ income_data.avg_surplus|dollar_format }}
+          </td>
+          <td style="color: {% if income_data.total_surplus < 0 %}
+              red
+            {% else %}
+              green
+            {% endif %};">
+  {{ income_data.total_surplus|dollar_format }}
+          </td>
+        </tr>
+        <tr>
+          <td>{{ savings_data.category__name }}</td>
+          <td>{{ savings_data.total|dollar_format }}</td>
+          <td>{{ savings_data.annual_budget|dollar_format }}</td>
+          <td>{{ savings_data.avg_per_month|dollar_format }}</td>
+          <td>{{ savings_data.budget|dollar_format }}</td>
+          <td style="color: {% if savings_data.avg_surplus < 0 %}
+              red
+            {% else %}
+              green
+            {% endif %};">
+          {{ savings_data.avg_surplus|dollar_format }}
+          </td>
+          <td style="color: {% if savings_data.total_surplus < 0 %}
+              red
+            {% else %}
+              green
+            {% endif %};">
+  {{ savings_data.total_surplus|dollar_format }}
+          </td>
+        </tr>
+
       </tbody>
     </table>
 
@@ -104,45 +170,62 @@
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-  const savingsData = {{ savings_chart_data|safe }};
-
-  new Chart(document.getElementById('savingsChart'), {
-    type: 'bar',
-    data: {
-      labels: savingsData.map(e => e.month),
-      datasets: [{
-        label: 'Net Savings ($)',
-        data: savingsData.map(e => e.savings),
-        backgroundColor: savingsData.map(e => e.savings >= 0 ? '#28a745' : '#dc3545')
-      }]
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: {
-        title: {
-          display: false
-        },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              return `$${context.raw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const savingsData = {{ savings_chart_data|safe }};
+  
+    new Chart(document.getElementById('savingsChart'), {
+      type: 'bar',
+      data: {
+        labels: savingsData.map(e => e.month),
+        datasets: [
+          {
+            label: 'Net Savings ($)',
+            data: savingsData.map(e => e.savings),
+            backgroundColor: savingsData.map(e => e.savings >= 0 ? '#28a745' : '#dc3545'),
+            yAxisID: 'y',
+            order: 1
+          },
+          {
+            label: '3-Month Avg ($)',
+            data: savingsData.map(e => e.running),
+            type: 'line',
+            borderColor: '#007bff',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            tension: 0.3,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            yAxisID: 'y',
+            order: 0
+          }
+        ]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          title: {
+            display: false
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                return `$${context.raw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              }
             }
+          },
+          legend: {
+            display: true
           }
         },
-        legend: {
-          display: false
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          title: {
-            display: true,
-            text: 'Amount ($)'
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Amount ($)'
+            }
           }
         }
       }
-    }
-  });
-</script>
+    });
+  </script>
 {% endblock %}

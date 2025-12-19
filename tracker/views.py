@@ -344,6 +344,8 @@ def delete_transaction(request, transaction_id):
 
 
 def reports_view(request):
+    income_total_amount = None
+    final_line_data = None 
     year_values = (
         Transaction.objects.annotate(year=ExtractYear("date"))
         .values_list("year", flat=True)
@@ -353,47 +355,67 @@ def reports_view(request):
     # Handle month/year selection
     month = int(request.GET.get("month", datetime.today().month))
     year = int(request.GET.get("year", datetime.today().year))
+
+    month_name = str(year) + '-' + str(month).zfill(2)
+
+    daily_totals = []
+    month_data = Month.objects.filter(name=month_name).first()
+    if month_data:
+        daily_totals = month_data.daily_spend
+        income_total_amount = float(month_data.total_income)
+        total_spent = float(month_data.total_spend)
+
+        final_line_data = []
+        for i, daily_total in enumerate(daily_totals):
+            date = datetime(year, month, i + 1)
+            final_line_data.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "cumulative": float(daily_total)
+            })
     
-    transactions = Transaction.objects.filter(date__month=month, date__year=year, amount__lt=0)
+    transactions = Transaction.objects.filter(date__month=month, date__year=year).exclude(category__name='Income') #, amount__lt=0)
 
-    income_total = Transaction.objects.filter(date__month=month, date__year=year, category__name='Income').aggregate(total=Sum('amount'))
+    if income_total_amount is None:
+        income_total = Transaction.objects.filter(date__month=month, date__year=year, category__name='Income').aggregate(total=Sum('amount'))
 
-    income_total_amount = float(income_total['total']) if income_total['total'] else 0
+        income_total_amount = float(income_total['total']) if income_total['total'] else 0
     
     # Pie chart data (by category)
     pie_data = transactions.values("category__name").annotate(total=Sum("amount")*-1)
 
-    # Line chart data (cumulative spend by date)
-    daily_totals = (
-        transactions.order_by("date")
-        .values("date")
-        .annotate(daily_total=Sum("amount"))
-    )
-    cumulative_total = 0
-    line_data = [{"date": datetime(year, month, 1).strftime("%Y-%m-%d"), "cumulative": 0}]
-    dates = {}
-    for item in daily_totals:
-        cumulative_total += item["daily_total"] * -1
-        line_data.append({"date": item["date"].strftime("%Y-%m-%d"), "cumulative": float(cumulative_total)})
-        dates[item["date"].isoformat()] = True
+    if final_line_data is None:
+        # Line chart data (cumulative spend by date)
+        daily_totals = (
+            transactions.order_by("date")
+            .values("date")
+            .annotate(daily_total=Sum("amount"))
+        )
+        cumulative_total = 0
+        line_data = [{"date": datetime(year, month, 1).strftime("%Y-%m-%d"), "cumulative": 0}]
+        dates = {}
+        for item in daily_totals:
+            cumulative_total += item["daily_total"] * -1
+            line_data.append({"date": item["date"].strftime("%Y-%m-%d"), "cumulative": float(cumulative_total)})
+            dates[item["date"].isoformat()] = True
 
-    new_line_data = []
-    for data in line_data:
-        tomorrow = datetime.strptime(data['date'], '%Y-%m-%d') + timedelta(days=1)
-        while (tomorrow.strftime('%Y-%m-%d') not in dates) and tomorrow < datetime(year, month+1, 1):
-            new_line_data.append({"date": tomorrow.strftime('%Y-%m-%d'), 'cumulative': data['cumulative']})
-            dates[tomorrow.isoformat()] = True
-            tomorrow = tomorrow + timedelta(days=1)
+        new_line_data = []
+        for data in line_data:
+            tomorrow = datetime.strptime(data['date'], '%Y-%m-%d') + timedelta(days=1)
+            first_of_next_month = datetime(year, month+1, 1) if month < 12 else datetime(year+1, 1, 1)
+            while (tomorrow.strftime('%Y-%m-%d') not in dates) and tomorrow < first_of_next_month:
+                new_line_data.append({"date": tomorrow.strftime('%Y-%m-%d'), 'cumulative': data['cumulative']})
+                dates[tomorrow.isoformat()] = True
+                tomorrow = tomorrow + timedelta(days=1)
 
-    ld_idx = nld_idx = 0
-    final_line_data = []
-    while len(final_line_data) < (len(line_data) + len(new_line_data)):
-        if nld_idx >= len(new_line_data) or (ld_idx < len(line_data) and line_data[ld_idx]['date'] < new_line_data[nld_idx]['date']):
-            final_line_data.append(line_data[ld_idx])
-            ld_idx += 1
-        else:
-            final_line_data.append(new_line_data[nld_idx])
-            nld_idx += 1
+        ld_idx = nld_idx = 0
+        final_line_data = []
+        while len(final_line_data) < (len(line_data) + len(new_line_data)):
+            if nld_idx >= len(new_line_data) or (ld_idx < len(line_data) and line_data[ld_idx]['date'] < new_line_data[nld_idx]['date']):
+                final_line_data.append(line_data[ld_idx])
+                ld_idx += 1
+            else:
+                final_line_data.append(new_line_data[nld_idx])
+                nld_idx += 1
 
     total_spent = float(sum([x["total"] for x in pie_data]))
 
@@ -405,9 +427,9 @@ def reports_view(request):
         percentage = total / total_spent * 100
         budget = float(Category.objects.get(name=item["category__name"]).budget) if Category.objects.filter(name=item["category__name"]).exists() else 0
         surplus = budget - total
-        print(item)
-        print(f'Category: {item["category__name"]}, Total: {total}, Percentage: {percentage:.2f}%, Budget: {budget}, Surplus: {surplus}')
-        print()
+        # print(item)
+        # print(f'Category: {item["category__name"]}, Total: {total}, Percentage: {percentage:.2f}%, Budget: {budget}, Surplus: {surplus}')
+        # print()
         pie_data_safe.append({
             "category__name": item["category__name"],
             "total": abs(total),
@@ -476,6 +498,25 @@ def reports_view(request):
         {"date": item["date"], "cumulative": float(item["cumulative"])}
         for item in final_line_data
     ]
+
+    if not month_data:
+        # print(final_line_data)
+        if final_line_data[1]['date'] == final_line_data[0]['date']:
+            final_line_data = final_line_data[1:]  # Remove the first element if it's a duplicate
+        # print(final_line_data)
+        daily_totals = []
+        for element in final_line_data:
+            # Append daily spend to the list, defaulting to 0 if not present
+            daily_totals.append(float(element["cumulative"]) if element["cumulative"] else 0)
+
+        # print(len(daily_totals))
+        if len(daily_totals) < 31:
+            # Fill in the remaining days with 0 if there are less than 31 days
+            daily_totals.extend([daily_totals[-1]] * (31 - len(daily_totals)))
+        # Create a new Month entry if it doesn't exist
+        month_data = Month(name=month_name, total_spend=total_spent, total_income=income_total_amount, daily_spend=daily_totals)
+        # print(month_data)
+        # month_data.save()
 
     context = {
         "selected_month": month,
@@ -609,7 +650,15 @@ def ytd_report(request):
         .annotate(total=Sum('amount') * -1)
     )
 
+    income_data = (
+        transactions.filter(category__name__iexact='income')
+        .values('category__name', 'category__budget')
+        .annotate(total=Sum('amount'))
+    )
+
     ytd_data = []
+    total_spend = 0
+    total_budget = 0
     for entry in spending_data:
         avg_per_month = entry['total'] / current_month
         budget = entry['category__budget'] or 0
@@ -617,35 +666,85 @@ def ytd_report(request):
         ytd_data.append({
             'category__name': entry['category__name'],
             'total': entry['total'],
+            'annual_budget': entry['category__budget'] * 12 if entry['category__budget'] else 0,
+            'avg_per_month': avg_per_month,
+            'budget': budget, 
+            'avg_surplus': avg_surplus,
+            'total_surplus': avg_surplus * current_month,
+        })
+        total_spend += avg_per_month
+        total_budget += budget
+
+    total_data = {
+        'category__name': 'Total Spend',
+        'total': (total_spend * current_month),
+        'annual_budget': (total_budget * 12),
+        'avg_per_month': total_spend,
+        'budget': total_budget,
+        'avg_surplus': (total_budget - total_spend),
+        'total_surplus': ((total_budget - total_spend) * current_month)
+    }
+
+    # print(f'total_spend: {total_spend}')
+    # print(f'total_budget: {total_budget}')
+    for entry in income_data:
+        avg_per_month = entry['total'] / current_month
+        budget = -1*entry['category__budget'] or 0
+        avg_surplus = -1*(budget - avg_per_month)
+        # print(f'income: {avg_per_month}')
+        income_data = {
+            'category__name': entry['category__name'],
+            'total': entry['total'],
+            'annual_budget': entry['category__budget'] * -12 if entry['category__budget'] else 0,
             'avg_per_month': avg_per_month,
             'budget': budget,
             'avg_surplus': avg_surplus,
             'total_surplus': avg_surplus * current_month,
-        })
-
+        }
+    savings_data = {
+        'category__name': 'Savings',
+        'total': income_data['total'] - (total_spend * current_month),
+        'annual_budget': income_data['annual_budget'] - (total_budget * 12),
+        'avg_per_month': income_data['avg_per_month'] - total_spend,
+        'budget': income_data['budget'] - total_budget,
+        'avg_surplus': (income_data['avg_surplus'] + (total_budget - total_spend)),
+        'total_surplus': (income_data['total_surplus'] + ((total_budget - total_spend) * current_month))
+    }
     # Net savings = income - spending for each month
     savings_chart_data = []
+    savings_history = []
+
     for month in range(1, current_month + 1):
         income = transactions.filter(
             date__month=month,
             category__name__iexact='income'
-        ).aggregate(total=Sum('amount'))['total'] or 0
+        ).aggregate(total=Sum('amount'))['total'] or 0 
 
         spend = transactions.exclude(
             category__name__iexact='income'
         ).filter(date__month=month).aggregate(total=Sum('amount'))['total'] or 0
 
+        savings = income + spend
+        savings_history.append(savings)
+        recent_history = savings_history[-3:]
+
+        running_average = sum(recent_history) / len(recent_history)
+
         savings_chart_data.append({
             'month': month_name[month][:3],
             'income': float(round(income, 2)),
             'spend': float(round(spend, 2)),
-            'savings': float(round(income + spend, 2))
+            'savings': float(round(savings, 2)),
+            'running': float(round(running_average, 2))
         })
 
     print(savings_chart_data)
     context = {
         'ytd_data': ytd_data,
-        'savings_chart_data': savings_chart_data
+        'savings_chart_data': savings_chart_data,
+        'total_data': total_data,
+        'income_data': income_data,
+        'savings_data': savings_data
     }
 
     return render(request, 'tracker/ytd.html', context)

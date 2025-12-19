@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.postgres.fields import ArrayField
 
 # Create your models here.
 class Category(models.Model):
@@ -43,3 +44,25 @@ class Transaction(models.Model):
         Meta class to define ordering for the Transaction model.
         """
         ordering = ['-date']
+
+class Month(models.Model):
+    """
+    Model representing a month for budget tracking.
+    """
+    name = models.CharField(max_length=50, unique=True)
+    total_spend = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    total_income = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    daily_spend = ArrayField(models.DecimalField(max_digits=10, decimal_places=2, default=0.00), blank=True, default=list) # List of len 31
+
+    def __str__(self):
+        """
+        String for representing the Month object (in admin site etc.)
+        """
+        return f'Name: {self.name} - Spend: ${self.total_spend} - Income: ${self.total_income}\n{self.daily_spend}\n{len(self.daily_spend)} days'
+    
+    class Meta:
+        """
+        Meta class to define ordering for the Month model.
+        This will ensure that months are ordered by name in ascending order.
+        """
+        ordering = ['name']
