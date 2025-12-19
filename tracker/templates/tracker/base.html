@@ -1,0 +1,20 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Budget Tracker{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'tracker/vendor/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'tracker/css/main.css' %}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="app-body">
+  {% include "./navbar.html" %}
+  <main class="page-container">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{% static 'tracker/vendor/bootstrap.bundle.min.js' %}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

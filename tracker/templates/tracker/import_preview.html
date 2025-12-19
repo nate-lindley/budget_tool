@@ -1,28 +1,35 @@
-{% include "./navbar.html" %}
+{% extends "tracker/base.html" %}
 {% load dict_extras %}
 
-<h2 style="text-align:center;">Preview CSV Import</h2>
+{% block title %}Preview Import{% endblock %}
 
-<table style="margin: auto; border-collapse: collapse;">
-  <thead>
-    <tr>
-      {% for col in column_map.keys %}
-        <th style="border: 1px solid #ccc; padding: 6px 12px;">{{ col|title }}</th>
-      {% endfor %}
-    </tr>
-  </thead>
-  <tbody>
-    {% for row in preview_rows %}
+{% block content %}
+  <div class="section-header">
+    <h2>Preview CSV Import</h2>
+    <p class="muted-note">Confirm the data looks correct before importing.</p>
+  </div>
+
+  <table class="import-table">
+    <thead>
       <tr>
-        {% for key in column_map.keys %}
-        <td style="border: 1px solid #ddd; padding: 6px 12px;">{{ row|get_item:key }}</td>
+        {% for col in column_map.keys %}
+          <th>{{ col|title }}</th>
         {% endfor %}
       </tr>
-    {% endfor %}
-  </tbody>
-</table>
+    </thead>
+    <tbody>
+      {% for row in preview_rows %}
+        <tr>
+          {% for key in column_map.keys %}
+          <td>{{ row|get_item:key }}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 
-<form method="post" action="{% url 'import_csv_confirm' %}" style="text-align:center; margin-top: 20px;">
-  {% csrf_token %}
-  <button type="submit" style="padding: 10px 20px;">Confirm Import</button>
-</form>
+  <form method="post" action="{% url 'import_csv_confirm' %}" class="import-actions">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-primary">Confirm Import</button>
+  </form>
+{% endblock %}

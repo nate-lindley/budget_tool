@@ -1,75 +1,17 @@
-{% include './navbar.html' %}
+{% extends "tracker/base.html" %}
 {% load static %}
 {% load humanize %}
 {% load number_formatting %}
 
-<head>
-  <title>Year-to-Date Tracker</title>
-  <style>
-    body {
-      background-color: #f8f9fa;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .container {
-      padding: 40px 20px;
-    }
-    h2 {
-      text-align: center;
-      margin-bottom: 30px;
-      font-weight: 600;
-    }
-    .ytd-table {
-      margin: auto;
-      width: 90%;
-      border-collapse: collapse;
-      background: #fff;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .ytd-table th,
-    .ytd-table td {
-      padding: 14px 18px;
-      border-bottom: 1px solid #eee;
-      text-align: left;
-    }
-    .ytd-table th {
-      background-color: #f5f5f5;
-      font-weight: 600;
-    }
-    .ytd-table tr:hover {
-      background-color: #f0f0f0;
-    }
-    .clickable-row {
-      cursor: pointer;
-    }
-    .chart-card {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-      padding: 20px;
-      flex: 1;
-      min-width: 320px;
-    }
-    #savingsChart {
-      height: 400px !important;
-    }
-    #categoryPieChart {
-      height: 400px !important;
-    }
-    .charts-row {
-      display: flex;
-      gap: 20px;
-      flex-wrap: wrap;
-      margin-top: 40px;
-    }
-  </style>
-</head>
+{% block title %}Year-to-Date Tracker{% endblock %}
 
 {% block content %}
-  <div class="container">
+  <div class="section-header">
     <h2>Year-to-Date Spending Overview</h2>
-    <table class="ytd-table">
+  </div>
+
+  <div class="table-wrapper">
+    <table class="data-table ytd-table">
       <thead>
         <tr>
           <th>Category</th>
@@ -89,41 +31,25 @@
             <td>{{ entry.annual_budget|dollar_format }}</td>
             <td>{{ entry.avg_per_month|dollar_format }}</td>
             <td>{{ entry.budget|dollar_format }}</td>
-            <td style="color: {% if entry.avg_surplus < 0 %}
-                red
-              {% else %}
-                green
-              {% endif %};">
-            {{ entry.avg_surplus|dollar_format }}
+            <td class="{% if entry.avg_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+              {{ entry.avg_surplus|dollar_format }}
             </td>
-            <td style="color: {% if entry.total_surplus < 0 %}
-                red
-              {% else %}
-                green
-              {% endif %};">
-    {{ entry.total_surplus|dollar_format }}
+            <td class="{% if entry.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+              {{ entry.total_surplus|dollar_format }}
             </td>
           </tr>
         {% endfor %}
-        <tr style="font-weight: bold;">
+        <tr class="summary-row">
           <td>{{ total_data.category__name }}</td>
           <td>{{ total_data.total|dollar_format }}</td>
           <td>{{ total_data.annual_budget|dollar_format }}</td>
           <td>{{ total_data.avg_per_month|dollar_format }}</td>
           <td>{{ total_data.budget|dollar_format }}</td>
-          <td style="color: {% if total_data.avg_surplus < 0 %}
-              red
-            {% else %}
-              green
-            {% endif %};">
-          {{ total_data.avg_surplus|dollar_format }}
+          <td class="{% if total_data.avg_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+            {{ total_data.avg_surplus|dollar_format }}
           </td>
-          <td style="color: {% if total_data.total_surplus < 0 %}
-              red
-            {% else %}
-              green
-            {% endif %};">
-  {{ total_data.total_surplus|dollar_format }}
+          <td class="{% if total_data.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+            {{ total_data.total_surplus|dollar_format }}
           </td>
         </tr>
         <tr>
@@ -132,19 +58,11 @@
           <td>{{ income_data.annual_budget|dollar_format }}</td>
           <td>{{ income_data.avg_per_month|dollar_format }}</td>
           <td>{{ income_data.budget|dollar_format }}</td>
-          <td style="color: {% if income_data.avg_surplus < 0 %}
-              red
-            {% else %}
-              green
-            {% endif %};">
-          {{ income_data.avg_surplus|dollar_format }}
+          <td class="{% if income_data.avg_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+            {{ income_data.avg_surplus|dollar_format }}
           </td>
-          <td style="color: {% if income_data.total_surplus < 0 %}
-              red
-            {% else %}
-              green
-            {% endif %};">
-  {{ income_data.total_surplus|dollar_format }}
+          <td class="{% if income_data.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+            {{ income_data.total_surplus|dollar_format }}
           </td>
         </tr>
         <tr>
@@ -153,38 +71,31 @@
           <td>{{ savings_data.annual_budget|dollar_format }}</td>
           <td>{{ savings_data.avg_per_month|dollar_format }}</td>
           <td>{{ savings_data.budget|dollar_format }}</td>
-          <td style="color: {% if savings_data.avg_surplus < 0 %}
-              red
-            {% else %}
-              green
-            {% endif %};">
-          {{ savings_data.avg_surplus|dollar_format }}
+          <td class="{% if savings_data.avg_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+            {{ savings_data.avg_surplus|dollar_format }}
           </td>
-          <td style="color: {% if savings_data.total_surplus < 0 %}
-              red
-            {% else %}
-              green
-            {% endif %};">
-  {{ savings_data.total_surplus|dollar_format }}
+          <td class="{% if savings_data.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
+            {{ savings_data.total_surplus|dollar_format }}
           </td>
         </tr>
-
       </tbody>
     </table>
-
-    <div class="charts-row">
-      <div class="chart-card">
-        <h5 style="text-align:center; margin-bottom: 20px;">Monthly Net</h5>
-        <canvas id="savingsChart"></canvas>
-      </div>
-      <div class="chart-card">
-        <h5 style="text-align:center; margin-bottom: 20px;">YTD Spend by Category</h5>
-        <canvas id="categoryPieChart"></canvas>
-      </div>
-    </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <div class="charts-row">
+    <div class="chart-card">
+      <h5>Monthly Net</h5>
+      <canvas id="savingsChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <h5>YTD Spend by Category</h5>
+      <canvas id="categoryPieChart"></canvas>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% static 'tracker/vendor/chart.umd.min.js' %}"></script>
   <script>
     const savingsData = {{ savings_chart_data|safe }};
     const categoryPieData = {{ category_pie_data|safe }};
@@ -193,7 +104,7 @@
         window.location.href = row.dataset.href;
       });
     });
-  
+
     new Chart(document.getElementById('savingsChart'), {
       type: 'bar',
       data: {

@@ -1,127 +1,17 @@
-{% include "./navbar.html" %}
+{% extends "tracker/base.html" %}
 {% load static %}
 {% load humanize %}
 {% load number_formatting %}
 
-<head>
-  <title>Monthly Reports</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f8f9fa;
-      margin: 0;
-      padding: 0;
-    }
+{% block title %}Monthly Reports{% endblock %}
 
-    .container {
-      text-align: center;
-      padding: 40px 20px 20px;
-    }
-
-    .container h2 {
-      font-size: 28px;
-      margin-bottom: 10px;
-    }
-
-    .container p {
-      font-size: 16px;
-      color: #555;
-    }
-
-    form {
-      display: flex;
-      justify-content: center;
-      gap: 12px;
-      margin: 20px 0 40px;
-      flex-wrap: wrap;
-    }
-
-    select {
-      padding: 10px 14px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      font-size: 16px;
-      background-color: #fff;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      transition: all 0.2s ease;
-    }
-
-    select:hover,
-    select:focus {
-      border-color: #888;
-      box-shadow: 0 0 6px rgba(0, 0, 0, 0.15);
-      outline: none;
-    }
-
-    .charts-container {
-      display: flex;
-      justify-content: center;
-      gap: 40px;
-      flex-wrap: wrap;
-      margin-bottom: 40px;
-    }
-
-    .chart-card {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-      padding: 20px;
-      width: 350px;
-    }
-
-    .category-table {
-      margin: 0 auto 60px;
-      width: 80%;
-      border-collapse: collapse;
-      background-color: #fff;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-
-    .category-table th,
-    .category-table td {
-      padding: 14px 18px;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-    }
-
-    .category-table th {
-      background-color: #f5f5f5;
-      font-weight: 600;
-      font-size: 15px;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .category-table tr:nth-child(even) {
-      background-color: #fafafa;
-    }
-
-    .category-table tr:hover {
-      background-color: #f0f0f0;
-    }
-
-    .category-table th:hover {
-        background-color: #eaeaea;
-      }
-
-    .highlight-row {
-      background-color: #fffbe6 !important;
-      font-weight: bold;
-    }
-    #lineChart,
-    #barChart {
-        height: 400px !important;
-    }
-  </style>
-</head>
 {% block content %}
-<div class="container">
-  <h2>Monthly Spending Report</h2>
-  <p>Select a month and year to see a detailed breakdown of your spending.</p>
+  <div class="section-header">
+    <h2>Monthly Spending Report</h2>
+    <p>Select a month and year to see a detailed breakdown of your spending.</p>
+  </div>
 
-  <form method="get">
+  <form method="get" class="filters">
     <select name="month" onchange="this.form.submit()">
       {% for num, name in months %}
         <option value="{{ num }}" {% if num == selected_month %}selected{% endif %}>{{ name }}</option>
@@ -133,272 +23,187 @@
       {% endfor %}
     </select>
   </form>
-</div>
 
-<div class="charts-container">
-  <div class="chart-card">
-    <canvas id="pieChart"></canvas>
+  <div class="charts-container">
+    <div class="chart-card">
+      <canvas id="pieChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <canvas id="lineChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <canvas id="barChart"></canvas>
+    </div>
   </div>
-  <div class="chart-card">
-    <canvas id="lineChart"></canvas>
-  </div>
-  <div class="chart-card">
-    <canvas id="barChart"></canvas>
-  </div>
-  
-</div>
 
-<table class="category-table" id="reportTable">
-  <thead>
-    <tr>
-        <th data-column="0" data-label="Category" onclick="sortTable(0)">Category</th>
-        <th data-column="1" data-label="Total Spent" onclick="sortTable(1)">Total</th>
-        <th data-column="2" data-label="Budget" onclick="sortTable(2)">Budget</th>
-        <th data-column="3" data-label="Surplus / Deficit" onclick="sortTable(3)">Surplus / Deficit</th>
-      </tr>
-  </thead>
-  <tbody>
-    {% for entry in table_data %}
+  <table class="data-table category-table" id="reportTable">
+    <thead>
       <tr>
-        <td>{{ entry.category__name }}</td>
-        <td>{{ entry.total|dollar_format }}</td>
-        <td style="color: {% if entry.is_budget_negative %}red{% else %}black{% endif %}">
-            {{ entry.budget|dollar_format }}
-          </td>
-          <td style="color: {% if entry.is_surplus_negative %}red{% else %}green{% endif %}">
-            {{ entry.surplus|dollar_format }}
-          </td>
-        {% comment %} {% if entry.is_budget_negative %}
-        <td>
-          -${{ entry.budget|floatformat:2|intcomma }}
-        </td>
-        {% else %}
-        <td>${{ entry.budget|floatformat:2|intcomma }}</td>
-        {% endif %} {% endcomment %}
-        {% comment %} {% if entry.is_surplus_negative %}
-          <td style="color: red;">-${{ entry.surplus|floatformat:2|intcomma }}</td>
-        {% else %}
-          <td style="color: green;">${{ entry.surplus|floatformat:2|intcomma }}</td>
-        {% endif %} {% endcomment %}
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
+          <th data-column="0" data-label="Category" onclick="sortTable(0)">Category</th>
+          <th data-column="1" data-label="Total Spent" onclick="sortTable(1)">Total</th>
+          <th data-column="2" data-label="Budget" onclick="sortTable(2)">Budget</th>
+          <th data-column="3" data-label="Surplus / Deficit" onclick="sortTable(3)">Surplus / Deficit</th>
+        </tr>
+    </thead>
+    <tbody>
+      {% for entry in table_data %}
+        <tr>
+          <td>{{ entry.category__name }}</td>
+          <td>{{ entry.total|dollar_format }}</td>
+          <td class="{% if entry.is_budget_negative %}text-negative{% endif %}">
+              {{ entry.budget|dollar_format }}
+            </td>
+            <td class="{% if entry.is_surplus_negative %}text-negative{% else %}text-positive{% endif %}">
+              {{ entry.surplus|dollar_format }}
+            </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-    function sortTable(columnIndex) {
-      const table = document.getElementById("reportTable");
-      const tbody = table.tBodies[0];
-      const rows = Array.from(tbody.rows);
-      const isNumber = columnIndex !== 0;
-    
-      const ths = table.querySelectorAll("th");
-      const currentIsAsc = table.dataset.sortCol == columnIndex && table.dataset.sortDir === "asc";
-      const direction = currentIsAsc ? -1 : 1;
-    
-      // Clear previous sort indicators
-      ths.forEach(th => {
-        th.classList.remove("sort-asc", "sort-desc");
-        th.innerText = th.dataset.label;
-      });
-    
-      // Update current sort indicator
-      const arrow = currentIsAsc ? " ↓" : " ↑";
-      const activeTh = table.querySelector(`th[data-column='${columnIndex}']`);
-      activeTh.innerText = activeTh.dataset.label + arrow;
-      activeTh.classList.add(currentIsAsc ? "sort-desc" : "sort-asc");
-    
-      // Sort rows
-      rows.sort((a, b) => {
-        let aText = a.cells[columnIndex].innerText.replace(/[^\d.-]/g, '');
-        let bText = b.cells[columnIndex].innerText.replace(/[^\d.-]/g, '');
-    
-        if (!isNumber) {
-          return a.cells[columnIndex].innerText.localeCompare(b.cells[columnIndex].innerText) * direction;
-        }
-    
-        return (parseFloat(aText) - parseFloat(bText)) * direction;
-      });
-    
-      table.dataset.sortCol = columnIndex;
-      table.dataset.sortDir = currentIsAsc ? "desc" : "asc";
-    
-      rows.forEach(row => tbody.appendChild(row));
-    }
-    </script>
-    
-<script>
-  const pieData = {{ pie_data|safe }};
-  const lineData = {{ line_data|safe }};
-  const barChartData = {
-    labels: ['Income', 'Total Spend'],
-    datasets: [{
-      label: 'Amount ($)',
-      data: [{{ income|default:0 }}, {{ total_spent|default:0 }}],
-      backgroundColor: ['#28a745', '#dc3545'] // green for income, red for spend
-    }]
-  };
-  
-  new Chart(document.getElementById('barChart'), {
-    type: 'bar',
-    data: {
-      labels: ['Income', 'Total Spend'],
-      datasets: [{
-        label: 'Amount ($)',
-        data: [{{ income|default:0 }}, {{ total_spent|default:0 }}],
-        backgroundColor: ['#28a745', '#dc3545']
-      }]
-    },
-    options: {
-      maintainAspectRatio: false,  // 👈 Matches line chart behavior
-      plugins: {
-        title: {
-          display: true,
-          text: 'Income vs Total Spend',
-          font: {
-            size: 18
-          },
-          padding: {
-            top: 10,
-            bottom: 20
+{% block scripts %}
+  <script src="{% static 'tracker/vendor/chart.umd.min.js' %}"></script>
+  <script>
+      function sortTable(columnIndex) {
+        const table = document.getElementById("reportTable");
+        const tbody = table.tBodies[0];
+        const rows = Array.from(tbody.rows);
+        const isNumber = columnIndex !== 0;
+      
+        const ths = table.querySelectorAll("th");
+        const currentIsAsc = table.dataset.sortCol == columnIndex && table.dataset.sortDir === "asc";
+        const direction = currentIsAsc ? -1 : 1;
+      
+        ths.forEach(th => th.classList.remove("table-active"));
+        ths[columnIndex].classList.add("table-active");
+      
+        rows.sort((a, b) => {
+          const aText = a.cells[columnIndex].innerText.trim().replace(/[$,]/g, '');
+          const bText = b.cells[columnIndex].innerText.trim().replace(/[$,]/g, '');
+      
+          let aValue = aText;
+          let bValue = bText;
+      
+          if (isNumber) {
+            aValue = parseFloat(aText) || 0;
+            bValue = parseFloat(bText) || 0;
           }
-        },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              return `$${context.raw.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-              })}`;
-            }
-          }
-        },
-        legend: {
-          display: false
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          title: {
-            display: true,
-            text: 'Amount ($)'
-          }
-        }
+      
+          if (aValue < bValue) return -1 * direction;
+          if (aValue > bValue) return 1 * direction;
+          return 0;
+        });
+      
+        rows.forEach(row => tbody.appendChild(row));
+      
+        table.dataset.sortCol = columnIndex;
+        table.dataset.sortDir = direction === 1 ? "asc" : "desc";
       }
-    }
-  });
-  
-  
+      
+      const pieData = {{ pie_data|safe }}.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
+      const lineData = {{ line_data|safe }};
+      const categories = pieData.map(e => e.category__name);
+      const totals = pieData.map(e => e.total);
+      const spendVsIncomeLabels = ['Income', 'Spend'];
+      const spendVsIncomeData = [{{ income|default:0 }}, {{ total_spent|default:0 }}];
 
-  const sortedPieData = [...pieData].sort((a, b) => b.total - a.total);
+      const pieCtx = document.getElementById('pieChart').getContext('2d');
+      const lineCtx = document.getElementById('lineChart').getContext('2d');
+      const barCtx = document.getElementById('barChart').getContext('2d');
 
-  new Chart(document.getElementById('pieChart'), {
-    type: 'pie',
-    data: {
-      labels: sortedPieData.map(e => e.category__name),
-      datasets: [{
-        data: sortedPieData.map(e => e.total),
-        backgroundColor: sortedPieData.map((_, i) => `hsl(${i * 30}, 70%, 70%)`)
-      }]
-    },
-    options: {
-      plugins: {
-        title: {
-            display: true,
-            text: 'Spend by Category',
-            font: {
-              size: 18
+      new Chart(pieCtx, {
+        type: 'pie',
+        data: {
+          labels: categories,
+          datasets: [{
+            data: totals,
+            backgroundColor: categories.map((_, idx) => `hsl(${idx * 30}, 70%, 60%)`)
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            title: {
+              display: true,
+              text: 'Spend by Category'
             },
-            padding: {
-              top: 10,
-              bottom: 20
-            }
-          },
-        legend: {
-          display: false  // 👈 Hides the legend entirely
-        },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              const value = context.raw;
-              const label = context.label || '';
-              return `${label}: $${value.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-              })}`;
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const label = context.label || '';
+                  const value = context.raw || 0;
+                  return `${label}: $${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                }
+              }
             }
           }
         }
-      }
-    }
-  });
-  
-  
-  
+      });
 
-  new Chart(document.getElementById('lineChart'), {
-    type: 'line',
-    data: {
-      labels: lineData.map(e => e.date),
-      datasets: [{
-        label: 'Cumulative Spend',
-        data: lineData.map(e => e.cumulative),
-        borderColor: '#007bff',
-        borderWidth: 2,
-        fill: false,
-        tension: 0.3,
-      }]
-    },
-    options: {
-      maintainAspectRatio: false, // Allows you to manually control height
-      plugins: {
-        title: {
-            display: true,
-            text: 'Cumulative Spending Over Time',
-            font: {
-              size: 18
-            },
-            padding: {
-              top: 10,
-              bottom: 20
-            }
-          },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              return `$${context.raw.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-              })}`;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          ticks: {
-            callback: function(value, index, ticks) {
-              const rawDate = this.getLabelForValue(value);
-              const d = new Date(rawDate);
-              return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-            }
-          },
-          title: {
-            display: true,
-            text: 'Date'
-          }
+      new Chart(lineCtx, {
+        type: 'line',
+        data: {
+          labels: lineData.map(e => e.date),
+          datasets: [{
+            label: 'Cumulative Spend',
+            data: lineData.map(e => e.cumulative),
+            borderColor: '#0d6efd',
+            backgroundColor: 'transparent',
+            tension: 0.25
+          }]
         },
-        y: {
-          title: {
-            display: true,
-            text: 'Amount ($)'
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top' },
+            title: {
+              display: true,
+              text: 'Cumulative Spend Over Month'
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Amount ($)' }
+            }
           }
         }
-      }
-    }
-  });
-  
-</script>
+      });
+
+      new Chart(barCtx, {
+        type: 'bar',
+        data: {
+          labels: spendVsIncomeLabels,
+          datasets: [
+            {
+              label: 'Amount',
+              data: spendVsIncomeData,
+              backgroundColor: ['#198754', '#0d6efd'],
+              borderRadius: 6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+            ,title: {
+              display: true,
+              text: 'Income vs Spend'
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Amount ($)' }
+            }
+          }
+        }
+      });
+  </script>
 {% endblock %}

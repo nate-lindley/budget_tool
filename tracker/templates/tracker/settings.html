@@ -1,114 +1,135 @@
-{% include './navbar.html' %}
+{% extends "tracker/base.html" %}
 {% load static %}
 {% load humanize %}
 {% load number_formatting %}
-<head><title>Settings</title></head>
+
+{% block title %}Settings{% endblock %}
 
 {% block content %}
-  <div class="container mt-5">
+  <div class="section-header">
     <h2>Settings</h2>
-    <div class="row my-4">
-      <!-- Sources Section -->
-      <div class="col-md-6">
-        <h4>Sources</h4>
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% if sources %}
-              {% for source in sources %}
-                <tr>
-                  <td>{{ source.name }}</td>
-                  <td>
-                    <!-- Example for Sources -->
-                    <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}">Edit</button>
-                    <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_source' source.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
-                  </td>
-                </tr>
-              {% endfor %}
-            {% endif %}
-          </tbody>
-        </table>
-        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addSourceModal">Add Source</button>
-      </div>
-
-      <!-- Categories Section -->
-      <div class="col-md-6">
-        <h4>Categories</h4>
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Budget</th>
-              <th>Implied Annual Budget
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% if categories %}
-              {% for category in categories %}
-                <tr>
-                  <td>{{ category.name }}</td>
-                  <td>
-                    {% if category.budget >= 0 %}
-                    ${{ category.budget|floatformat:0|intcomma }}
-                    {% else %}
-                    -${{ category.negative_budget|floatformat:0|intcomma }}
-                    {% endif %}
-                  </td>
-                  <td>
-                    {% if category.annual_budget >= 0 %}
-                    ${{ category.annual_budget|floatformat:0|intcomma }}
-                    {% else %}
-                    -${{ category.annual_negative_budget|floatformat:0|intcomma }}
-                    {% endif %}
-                  <td>
-                    <button class="btn btn-sm btn-warning edit-category-btn" data-bs-toggle="modal" data-bs-target="#editCategoryModal" data-id="{{ category.id }}" data-name="{{ category.name }}" data-amount="{{ category.budget }}">Edit</button>
-                    <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_category' category.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
-                  </td>
-                </tr>
-              {% endfor %}
-                <tr>
-                  <td><strong>Net Monthly Spend</strong></td>
-                  <td>
-                    {% if total.budget >= 0 %}
-                    ${{ total.budget|floatformat:0|intcomma }}
-                    {% else %}
-                    -${{ total.negative_budget|floatformat:0|intcomma }}
-                    {% endif %}
-                  </td>
-                  <td>
-                    {% if total.annual_budget >= 0 %}
-                    ${{ total.annual_budget|floatformat:0|intcomma }}
-                    {% else %}
-                    -${{ total.annual_negative_budget|floatformat:0|intcomma }}
-                    {% endif %}
-                  </td>
-                  <td></td>
-            {% endif %}
-          </tbody>
-        </table>
-        <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addCategoryModal">Add Category</button>
-      </div>
-    </div>
-    <form method="post" enctype="multipart/form-data" action="{% url 'import_csv_preview' %}" style="margin: 20px auto; text-align: center;">
-      {% csrf_token %}
-      <input type="file" name="csv_file" accept=".csv" required>
-      <button type="submit">Preview CSV</button>
-    </form>
-    
+    <p class="muted-note">Manage your sources, categories, and budgets.</p>
   </div>
 
+  <div class="row g-4">
+    <div class="col-md-6">
+      <div class="card-panel h-100">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h4 class="mb-0">Sources</h4>
+          <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addSourceModal">Add Source</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if sources %}
+                {% for source in sources %}
+                  <tr>
+                    <td>{{ source.name }}</td>
+                    <td>
+                      <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}">Edit</button>
+                      <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_source' source.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card-panel h-100">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h4 class="mb-0">Categories</h4>
+          <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addCategoryModal">Add Category</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Budget</th>
+                <th>Implied Annual Budget</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if categories %}
+                {% for category in categories %}
+                  <tr>
+                    <td>{{ category.name }}</td>
+                    <td>
+                      {% if category.budget >= 0 %}
+                      ${{ category.budget|floatformat:0|intcomma }}
+                      {% else %}
+                      -${{ category.negative_budget|floatformat:0|intcomma }}
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if category.annual_budget >= 0 %}
+                      ${{ category.annual_budget|floatformat:0|intcomma }}
+                      {% else %}
+                      -${{ category.annual_negative_budget|floatformat:0|intcomma }}
+                      {% endif %}
+                    </td>
+                    <td>
+                      <button class="btn btn-sm btn-warning edit-category-btn" data-bs-toggle="modal" data-bs-target="#editCategoryModal" data-id="{{ category.id }}" data-name="{{ category.name }}" data-amount="{{ category.budget }}">Edit</button>
+                      <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_category' category.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
+                    </td>
+                  </tr>
+                {% endfor %}
+                  <tr class="table-light fw-semibold">
+                    <td>Net Monthly Spend</td>
+                    <td>
+                      {% if total.budget >= 0 %}
+                      ${{ total.budget|floatformat:0|intcomma }}
+                      {% else %}
+                      -${{ total.negative_budget|floatformat:0|intcomma }}
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if total.annual_budget >= 0 %}
+                      ${{ total.annual_budget|floatformat:0|intcomma }}
+                      {% else %}
+                      -${{ total.annual_negative_budget|floatformat:0|intcomma }}
+                      {% endif %}
+                    </td>
+                    <td></td>
+                {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <form method="post" enctype="multipart/form-data" action="{% url 'import_csv_preview' %}" class="import-actions">
+    {% csrf_token %}
+    <input type="file" name="csv_file" accept=".csv" required>
+    <button type="submit" class="btn btn-primary">Preview CSV</button>
+  </form>
+
+  {% include './modals/add_source.html' %}
+  {% include './modals/edit_source.html' %}
+  {% include './modals/add_category.html' %}
+  {% include './modals/edit_category.html' %}
+  {% include './modals/confirm_delete.html' %}
+{% endblock %}
+
+{% block scripts %}
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       const editSourceButtons = document.querySelectorAll('.edit-source-btn')
       const editSourceForm = document.getElementById('editSourceForm')
       const nameInput = document.getElementById('editSourceName')
-    
+
       editSourceButtons.forEach((button) => {
         button.addEventListener('click', () => {
           const sourceId = button.getAttribute('data-id')
@@ -118,44 +139,37 @@
         })
       })
     })
-    
+  </script>
+  <script>
     document.addEventListener('DOMContentLoaded', function () {
       const editCategoryButtons = document.querySelectorAll('.edit-category-btn')
       const editCategoryForm = document.getElementById('editCategoryForm')
       const nameInput = document.getElementById('editCategoryName')
-      const budgetInput = document.getElementById('editCategoryBudget')
-    
+      const amountInput = document.getElementById('editCategoryAmount')
+
       editCategoryButtons.forEach((button) => {
         button.addEventListener('click', () => {
           const categoryId = button.getAttribute('data-id')
           const categoryName = button.getAttribute('data-name')
-          const categoryBudget = button.getAttribute('data-amount')
+          const categoryAmount = button.getAttribute('data-amount')
           nameInput.value = categoryName
-          budgetInput.value = categoryBudget
-          console.log(budgetInput.value)
+          amountInput.value = categoryAmount
           editCategoryForm.action = `{% url 'edit_category' 0 %}`.replace(/0/, categoryId)
         })
       })
     })
-    
+  </script>
+  <script>
     document.addEventListener('DOMContentLoaded', function () {
-      const deleteButtons = document.querySelectorAll('.delete-btn')
-      const deleteForm = document.getElementById('confirmDeleteForm')
-    
+      const deleteButtons = document.querySelectorAll('.delete-btn');
+      const deleteForm = document.getElementById('confirmDeleteForm');
+
       deleteButtons.forEach((button) => {
         button.addEventListener('click', () => {
-          const url = button.getAttribute('data-url')
-          deleteForm.action = url
-        })
-      })
-    })
+          const url = button.getAttribute('data-url');
+          deleteForm.action = url;
+        });
+      });
+    });
   </script>
-
-  {% include './modals/add_category.html' %}
-  {% include './modals/add_source.html' %}
-  {% include './modals/add_transaction.html' %}
-  {% include './modals/edit_source.html' %}
-  {% include './modals/edit_category.html' %}
-  {% include './modals/edit_transaction.html' %}
-  {% include './modals/confirm_delete.html' %}
 {% endblock %}
