@@ -1,13 +1,47 @@
 from django.shortcuts import render, HttpResponseRedirect
 from .models import *
 from datetime import datetime, timedelta
-from django.db.models import Sum
+from django.db.models import Sum, Q, Exists, OuterRef, Min, Max
 import calendar
-from django.db.models.functions import ExtractYear, ExtractMonth
+from django.db.models.functions import ExtractYear, ExtractMonth, Coalesce
 import csv
 from io import TextIOWrapper
 from django.core.paginator import Paginator
 import time
+
+
+def annotate_reporting_category(queryset):
+    return queryset.annotate(
+        reporting_category_id=Coalesce('category__reporting_category_id', 'category_id'),
+        reporting_category_name=Coalesce('category__reporting_category__name', 'category__name'),
+        reporting_category_budget=Coalesce('category__reporting_category__budget', 'category__budget'),
+    )
+
+
+def quarter_label(date_value):
+    if not date_value:
+        return ""
+    quarter = (date_value.month - 1) // 3 + 1
+    return f"{date_value.year}Q{quarter}"
+
+
+def quarter_date_range(label):
+    if not label or "Q" not in label:
+        return None, None
+    year_part, quarter_part = label.split("Q", 1)
+    try:
+        year = int(year_part)
+        quarter = int(quarter_part)
+    except ValueError:
+        return None, None
+    if quarter < 1 or quarter > 4:
+        return None, None
+    start_month = 1 + (quarter - 1) * 3
+    end_month = start_month + 2
+    start_date = datetime(year, start_month, 1).date()
+    end_day = calendar.monthrange(year, end_month)[1]
+    end_date = datetime(year, end_month, end_day).date()
+    return start_date, end_date
 
 # Create your views here.
 def index(request):
@@ -133,8 +167,27 @@ def add_category(request):
     if not 'name' in request.POST:
         # If the 'name' field is not in the POST data, redirect to the index page
         return HttpResponseRedirect("/")
-    
-    new_category, created = Category.objects.get_or_create(name=request.POST['name'], budget=request.POST['budget'])
+
+    budget_value = request.POST.get('budget')
+    reporting_category_id = request.POST.get('reporting_category') or None
+    if reporting_category_id:
+        budget_value = None
+
+    category_defaults = {}
+    if budget_value not in (None, ""):
+        try:
+            category_defaults['budget'] = float(budget_value)
+        except ValueError:
+            category_defaults['budget'] = 0
+
+    new_category, created = Category.objects.get_or_create(
+        name=request.POST['name'],
+        defaults=category_defaults
+    )
+    if reporting_category_id:
+        new_category.reporting_category_id = int(reporting_category_id)
+    elif budget_value not in (None, ""):
+        new_category.budget = category_defaults.get('budget', new_category.budget)
     new_category.save()  # Save the new category to the database
 
     # Get the referring URL or use a default if it's not available
@@ -171,6 +224,7 @@ def settings_page(request):
     This is a placeholder and will be implemented later.
     """
     categories = Category.objects.all()  # Retrieve all categories from the database
+    reporting_categories = categories.filter(reporting_category__isnull=True)
     total_budget = 0
     for category in categories:
         category.annual_budget = category.budget * 12  # Calculate the annual budget for each category
@@ -180,20 +234,66 @@ def settings_page(request):
     sources = Source.objects.all()
     categories_data = list(categories.values('id', 'name'))
     reward_category_map = {}
-    for reward_category in RewardCategory.objects.select_related('source', 'category'):
+    reward_categories = list(RewardCategory.objects.select_related('source', 'category'))
+    for reward_category in reward_categories:
         source_id = str(reward_category.source_id)
         category_id = str(reward_category.category_id)
-        reward_category_map.setdefault(source_id, {})[category_id] = float(reward_category.multiplier)
+        reward_category_map.setdefault(source_id, {})[category_id] = {
+            "multiplier": float(reward_category.multiplier),
+            "applicable_quarter": reward_category.applicable_quarter,
+        }
+
+    date_bounds = Transaction.objects.aggregate(
+        min_date=Min('date'),
+        max_date=Max('date')
+    )
+    min_date = date_bounds['min_date']
+    max_date = date_bounds['max_date']
+    for reward_category in reward_categories:
+        if not reward_category.applicable_quarter:
+            continue
+        quarter_start, quarter_end = quarter_date_range(reward_category.applicable_quarter)
+        if not quarter_start or not quarter_end:
+            continue
+        if not min_date or quarter_start < min_date:
+            min_date = quarter_start
+        if not max_date or quarter_end > max_date:
+            max_date = quarter_end
+    if not min_date or not max_date:
+        current_year = datetime.now().year
+        min_date = datetime(current_year, 1, 1).date()
+        max_date = datetime(current_year, 12, 31).date()
+
+    start_label = quarter_label(min_date)
+    end_label = quarter_label(max_date)
+    start_year, start_quarter = start_label.split("Q")
+    end_year, end_quarter = end_label.split("Q")
+    start_year = int(start_year)
+    start_quarter = int(start_quarter)
+    end_year = int(end_year)
+    end_quarter = int(end_quarter)
+
+    quarters = []
+    year = start_year
+    quarter = start_quarter
+    while (year, quarter) <= (end_year, end_quarter):
+        quarters.append(f"{year}Q{quarter}")
+        quarter += 1
+        if quarter > 4:
+            quarter = 1
+            year += 1
     today = datetime.now().strftime("%Y-%m-%d")  # Get today's date in the format YYYY-MM-DD for any future use in the template
     # categories = list(categories)  # Convert the queryset to a list for easier manipulation
     total = ({'name': 'Total', 'budget': total_budget, 'annual_budget': total_budget*12, 'negative_budget':total_budget*-1, 'annual_negative_budget':total_budget*-12})  # Append the total budget to the categories list
     # Pass the categories and sources to the template context
     context = {
         'categories': categories,  # Pass all categories to the template
+        'reporting_categories': reporting_categories,
         'sources': sources,  # Pass all sources to the template
         'today': today,  # Pass today's date to the template for any future use
         'total': total,
         'source_reward_map': reward_category_map,
+        'quarters': quarters,
         'categories_data': categories_data
     }
     return render(request, "tracker/settings.html", context)
@@ -228,6 +328,8 @@ def edit_source(request, source_id):
         for multiplier_key in posted_multiplier_keys:
             category_id = multiplier_key.split("reward_multiplier_")[-1]
             multiplier_value = request.POST.get(multiplier_key, "").strip()
+            quarter_key = f"reward_quarter_{category_id}"
+            quarter_label_value = request.POST.get(quarter_key, "").strip()
             if multiplier_value == "":
                 RewardCategory.objects.filter(source=source, category_id=category_id).delete()
                 continue
@@ -238,6 +340,7 @@ def edit_source(request, source_id):
                 continue
             reward_category, _ = RewardCategory.objects.get_or_create(source=source, category_id=category_id)
             reward_category.multiplier = multiplier
+            reward_category.applicable_quarter = quarter_label_value or None
             reward_category.save()
         return HttpResponseRedirect("/settings/")
     
@@ -414,15 +517,24 @@ def reports_view(request):
                 "cumulative": float(daily_total)
             })
     
-    transactions = Transaction.objects.filter(date__month=month, date__year=year).exclude(category__name='Income') #, amount__lt=0)
+    base_transactions = Transaction.objects.filter(date__month=month, date__year=year)
+    transactions = base_transactions.exclude(category__name__iexact='income').exclude(
+        category__reporting_category__name__iexact='income'
+    )
 
     if income_total_amount is None:
-        income_total = Transaction.objects.filter(date__month=month, date__year=year, category__name='Income').aggregate(total=Sum('amount'))
+        income_total = base_transactions.filter(
+            Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income')
+        ).aggregate(total=Sum('amount'))
 
         income_total_amount = float(income_total['total']) if income_total['total'] else 0
     
     # Pie chart data (by category)
-    pie_data = transactions.values("category__name").annotate(total=Sum("amount")*-1)
+    pie_data = (
+        annotate_reporting_category(transactions)
+        .values("reporting_category_id", "reporting_category_name", "reporting_category_budget")
+        .annotate(total=Sum("amount") * -1)
+    )
 
     if final_line_data is None:
         # Line chart data (cumulative spend by date)
@@ -465,21 +577,21 @@ def reports_view(request):
     all_categories = []
     for item in pie_data:
         total = float(item["total"])
-        percentage = total / total_spent * 100
-        budget = float(Category.objects.get(name=item["category__name"]).budget) if Category.objects.filter(name=item["category__name"]).exists() else 0
+        percentage = total / total_spent * 100 if total_spent else 0
+        budget = float(item["reporting_category_budget"] or 0)
         surplus = budget - total
         # print(item)
         # print(f'Category: {item["category__name"]}, Total: {total}, Percentage: {percentage:.2f}%, Budget: {budget}, Surplus: {surplus}')
         # print()
         pie_data_safe.append({
-            "category__name": item["category__name"],
+            "category__name": item["reporting_category_name"],
             "total": abs(total),
             "percentage": abs(percentage),
             "budget": abs(budget),
             "surplus": abs(surplus),
         })
         all_categories.append({
-            "category__name": item["category__name"],  
+            "category__name": item["reporting_category_name"],
             "total": abs(total),
             "percentage": abs(percentage),
             "budget": abs(budget),
@@ -489,7 +601,7 @@ def reports_view(request):
             "is_negative": total < 0,
         })
 
-    categories = Category.objects.all()
+    categories = Category.objects.filter(reporting_category__isnull=True)
 
     total_budget = float(sum(x for x in [cat.budget for cat in categories if cat.budget is not None])) * -1
 
@@ -704,16 +816,24 @@ def ytd_report(request):
         # Transactions for the year
         transactions = Transaction.objects.filter(date__year=year, date__month__lte=current_month)
 
-    # Total spent per category (excluding income)
+    # Total spent per reporting category (excluding income)
     spending_data = (
-        transactions.exclude(category__name__iexact='income')
-        .values('category__name', 'category__budget', 'category__id')
+        annotate_reporting_category(
+            transactions.exclude(category__name__iexact='income').exclude(
+                category__reporting_category__name__iexact='income'
+            )
+        )
+        .values('reporting_category_id', 'reporting_category_name', 'reporting_category_budget')
         .annotate(total=Sum('amount') * -1)
     )
 
     income_data = (
-        transactions.filter(category__name__iexact='income')
-        .values('category__name', 'category__budget', 'category__id')
+        annotate_reporting_category(
+            transactions.filter(
+                Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income')
+            )
+        )
+        .values('reporting_category_id', 'reporting_category_name', 'reporting_category_budget')
         .annotate(total=Sum('amount'))
     )
 
@@ -723,22 +843,22 @@ def ytd_report(request):
     category_pie_data = []
     for entry in spending_data:
         avg_per_month = entry['total'] / months_count
-        budget = entry['category__budget'] or 0
+        budget = entry['reporting_category_budget'] or 0
         avg_surplus = budget - avg_per_month
         ytd_data.append({
-            'category__name': entry['category__name'],
-            'category__id': entry['category__id'],
+            'category__name': entry['reporting_category_name'],
+            'category__id': entry['reporting_category_id'],
             'total': entry['total'],
-            'annual_budget': entry['category__budget'] * 12 if entry['category__budget'] else 0,
+            'annual_budget': entry['reporting_category_budget'] * 12 if entry['reporting_category_budget'] else 0,
             'avg_per_month': avg_per_month,
             'budget': budget, 
             'avg_surplus': avg_surplus,
             'total_surplus': avg_surplus * months_count,
         })
         category_pie_data.append({
-            "label": entry["category__name"],
+            "label": entry["reporting_category_name"],
             "total": float(entry["total"]),
-            "category_id": entry["category__id"],
+            "category_id": entry["reporting_category_id"],
         })
         total_spend += avg_per_month
         total_budget += budget
@@ -761,14 +881,14 @@ def ytd_report(request):
     # print(f'total_budget: {total_budget}')
     for entry in income_data:
         avg_per_month = entry['total'] / months_count
-        budget = -1*entry['category__budget'] or 0
+        budget = -1*entry['reporting_category_budget'] or 0
         avg_surplus = -1*(budget - avg_per_month)
         # print(f'income: {avg_per_month}')
         income_data = {
-            'category__name': entry['category__name'],
+            'category__name': entry['reporting_category_name'],
             'total': entry['total'],
-            'category__id': entry['category__id'],
-            'annual_budget': entry['category__budget'] * -12 if entry['category__budget'] else 0,
+            'category__id': entry['reporting_category_id'],
+            'annual_budget': entry['reporting_category_budget'] * -12 if entry['reporting_category_budget'] else 0,
             'avg_per_month': avg_per_month,
             'budget': budget,
             'avg_surplus': avg_surplus,
@@ -843,20 +963,24 @@ def mtd_report(request):
     # Transactions for the current month
     transactions = Transaction.objects.filter(date__year=year, date__month=month)
 
-    # Total spent per category (excluding income)
+    # Total spent per reporting category (excluding income)
     spending_data = (
-        transactions.exclude(category__name__iexact='income')
-        .values('category__name', 'category__budget')
+        annotate_reporting_category(
+            transactions.exclude(category__name__iexact='income').exclude(
+                category__reporting_category__name__iexact='income'
+            )
+        )
+        .values('reporting_category_name', 'reporting_category_budget')
         .annotate(total=Sum('amount') * -1)
     )
 
     mtd_data = []
     for entry in spending_data:
         avg_per_month = entry['total'] / month
-        budget = entry['category__budget'] or 0
+        budget = entry['reporting_category_budget'] or 0
         avg_surplus = budget - avg_per_month
         mtd_data.append({
-            'category__name': entry['category__name'],
+            'category__name': entry['reporting_category_name'],
             'total': entry['total'],
             'avg_per_month': avg_per_month,
             'budget': budget,
@@ -892,11 +1016,119 @@ def mtd_report(request):
     return render(request, 'tracker/mtd.html', context)
 
 
+def rewards_tracker(request):
+    selected_year = request.GET.get('year')
+    selected_year = int(selected_year) if selected_year and selected_year.isdigit() else datetime.now().year
+
+    transaction_years = (
+        Transaction.objects.annotate(year=ExtractYear("date"))
+        .values_list("year", flat=True)
+        .distinct()
+        .order_by("year")
+    )
+    quarter_years = RewardCategory.objects.exclude(applicable_quarter__isnull=True).exclude(
+        applicable_quarter__exact=""
+    ).values_list("applicable_quarter", flat=True)
+    quarter_year_values = []
+    for label in quarter_years:
+        if "Q" in label:
+            year_part = label.split("Q", 1)[0]
+            if year_part.isdigit():
+                quarter_year_values.append(int(year_part))
+    years = sorted(set(list(transaction_years) + quarter_year_values))
+    if not years:
+        years = [selected_year]
+    if selected_year not in years and years:
+        selected_year = years[-1]
+
+    sources = Source.objects.annotate(
+        has_rewards=Exists(RewardCategory.objects.filter(source=OuterRef('pk')))
+    ).order_by('-has_rewards', 'name')
+    sources_data = []
+
+    for source in sources:
+        reward_entries = RewardCategory.objects.filter(source=source).select_related('category', 'category__reporting_category')
+        reward_rows = []
+        total_rewards = 0
+        total_spend = 0
+        covered_spend = 0
+
+        base_transactions = Transaction.objects.filter(source=source, date__year=selected_year).exclude(
+            Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income')
+        )
+        total_source_spend = abs(float(base_transactions.aggregate(total=Sum('amount'))['total'] or 0))
+
+        for entry in reward_entries:
+            transaction_query = Transaction.objects.filter(
+                source=source,
+                category=entry.category
+            )
+            if entry.applicable_quarter:
+                quarter_start, quarter_end = quarter_date_range(entry.applicable_quarter)
+                if quarter_start and quarter_end:
+                    if quarter_start.year != selected_year:
+                        transaction_query = transaction_query.none()
+                    else:
+                        transaction_query = transaction_query.filter(
+                            date__gte=quarter_start,
+                            date__lte=quarter_end
+                        )
+            else:
+                transaction_query = transaction_query.filter(date__year=selected_year)
+            transaction_total = transaction_query.aggregate(total=Sum('amount'))['total'] or 0
+            spend = abs(float(transaction_total))
+            multiplier = float(entry.multiplier)
+            rewards = spend * multiplier
+
+            reward_rows.append({
+                'category_name': entry.category.name,
+                'reporting_category_name': entry.category.reporting_category.name if entry.category.reporting_category else None,
+                'multiplier': multiplier,
+                'spend': spend,
+                'rewards': rewards,
+            })
+            covered_spend += spend
+            total_spend += spend
+            total_rewards += rewards
+
+        blanket_spend = max(total_source_spend - covered_spend, 0)
+        blanket_multiplier = 0.01 if source.reward_type == 'cashback' else 1.0
+        blanket_rewards = blanket_spend * blanket_multiplier
+        if blanket_spend > 0:
+            reward_rows.append({
+                'category_name': 'All Other',
+                'reporting_category_name': None,
+                'multiplier': blanket_multiplier,
+                'multiplier_label': '1%' if source.reward_type == 'cashback' else '1.00x',
+                'spend': blanket_spend,
+                'rewards': blanket_rewards,
+                'is_blanket': True,
+            })
+            total_spend += blanket_spend
+            total_rewards += blanket_rewards
+
+        reward_rows.sort(key=lambda row: (row.get('is_blanket', False), row['category_name']))
+        sources_data.append({
+            'source': source,
+            'reward_rows': reward_rows,
+            'total_spend': total_spend,
+            'total_rewards': total_rewards,
+        })
+
+    context = {
+        'sources_data': sources_data,
+        'years': years,
+        'selected_year': selected_year,
+    }
+
+    return render(request, 'tracker/rewards.html', context)
+
+
 def category_year_view(request):
     """
     Display a bar chart of a single category's monthly totals for the selected year.
     """
-    categories = Category.objects.all().order_by('name')
+    categories = Category.objects.filter(reporting_category__isnull=True).order_by('name')
     current_year = datetime.now().year
     year_values = (
         Transaction.objects.annotate(year=ExtractYear("date"))
@@ -918,7 +1150,10 @@ def category_year_view(request):
         try:
             selected_category = Category.objects.get(id=category_id)
             monthly_data = (
-                Transaction.objects.filter(category=selected_category, date__year=year)
+                Transaction.objects.filter(
+                    Q(category=selected_category) | Q(category__reporting_category=selected_category),
+                    date__year=year
+                )
                 .annotate(month=ExtractMonth("date"))
                 .values("month")
                 .annotate(total=Sum("amount"))

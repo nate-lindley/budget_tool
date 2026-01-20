@@ -20,7 +20,7 @@
               <label for="editCategoryReporting" class="form-label">Reporting Category</label>
               <select class="form-select" id="editCategoryReporting" name="reporting_category">
                 <option value="">None</option>
-                {% for category in categories %}
+                {% for category in reporting_categories %}
                   <option value="{{ category.id }}">{{ category.name }}</option>
                 {% endfor %}
               </select>

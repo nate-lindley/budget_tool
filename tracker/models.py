@@ -36,6 +36,7 @@ class RewardCategory(models.Model):
     source = models.ForeignKey(Source, on_delete=models.CASCADE)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
     multiplier = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
+    applicable_quarter = models.CharField(max_length=10, null=True, blank=True)
 
     class Meta:
         """

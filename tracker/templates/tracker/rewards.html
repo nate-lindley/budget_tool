@@ -1,0 +1,91 @@
+{% extends "tracker/base.html" %}
+{% load humanize %}
+{% load number_formatting %}
+
+{% block title %}Rewards Tracker{% endblock %}
+
+{% block content %}
+  <div class="section-header">
+    <h2>Rewards Tracker</h2>
+    <p class="muted-note">Track earned rewards by source and keep them aligned with reporting categories.</p>
+  </div>
+
+  <form method="get" class="filters">
+    <select name="year" onchange="this.form.submit()">
+      {% for year in years %}
+        <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  {% if sources_data %}
+    {% for entry in sources_data %}
+      <div class="card-panel">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+          <div>
+            <h4 class="mb-1">{{ entry.source.name }}</h4>
+            <div class="text-subtle small">
+              Reward type: {{ entry.source.get_reward_type_display }}
+              {% if entry.source.annual_fee %}
+                &nbsp;•&nbsp; Annual fee: {{ entry.source.annual_fee|dollar_format }}
+              {% endif %}
+            </div>
+          </div>
+          <div class="text-end">
+            <div class="text-subtle small">Total Rewards</div>
+            <div class="fs-5 fw-semibold">
+              {% if entry.source.reward_type == "cashback" %}
+                {{ entry.total_rewards|dollar_format }}
+              {% else %}
+                {{ entry.total_rewards|floatformat:0|intcomma }}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        {% if entry.reward_rows %}
+          <div class="table-responsive">
+            <table class="table table-striped align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Reward Category</th>
+                  <th>Reporting Category</th>
+                  <th>Multiplier</th>
+                  <th>Spend</th>
+                  <th>Rewards</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in entry.reward_rows %}
+                  <tr>
+                    <td>{{ row.category_name }}</td>
+                    <td>{{ row.reporting_category_name|default:"-" }}</td>
+                    <td>
+                      {% if row.multiplier_label %}
+                        {{ row.multiplier_label }}
+                      {% else %}
+                        {{ row.multiplier|floatformat:2 }}x
+                      {% endif %}
+                    </td>
+                    <td>{{ row.spend|dollar_format }}</td>
+                    <td>
+                      {% if entry.source.reward_type == "cashback" %}
+                        {{ row.rewards|dollar_format }}
+                      {% else %}
+                        {{ row.rewards|floatformat:0|intcomma }}
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="text-subtle mb-0">No reward categories configured for this source yet.</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="text-subtle center-text">Add a source and reward categories in Settings to see rewards here.</p>
+  {% endif %}
+{% endblock %}

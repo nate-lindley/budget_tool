@@ -13,8 +13,17 @@
               <input type="text" class="form-control" id="categoryName" name="name" required>
             </div>
             <div class="mb-3">
+              <label for="addCategoryReporting" class="form-label">Reporting Category</label>
+              <select class="form-select" id="addCategoryReporting" name="reporting_category">
+                <option value="">None</option>
+                {% for category in reporting_categories %}
+                  <option value="{{ category.id }}">{{ category.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-3" id="addCategoryBudgetGroup">
               <label for="addCategoryBudget" class="form-label">Monthly Budget</label>
-              <input type="number" step="0.01" class="form-control" name="budget" id="addCategoryBudget" class="form-control" required>
+              <input type="number" step="0.01" class="form-control" name="budget" id="addCategoryBudget" required>
             </div>
           </div>
           <div class="modal-footer">

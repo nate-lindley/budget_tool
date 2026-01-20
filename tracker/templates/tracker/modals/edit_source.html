@@ -42,6 +42,12 @@
                 <div class="input-group mb-2 reward-category-row" data-category-id="">
                   <span class="input-group-text reward-category-name"></span>
                   <input type="number" class="form-control reward-multiplier-input" step="0.01" min="0" placeholder="Multiplier">
+                  <select class="form-select reward-quarter-select">
+                    <option value="">Quarter</option>
+                    {% for quarter in quarters %}
+                      <option value="{{ quarter }}">{{ quarter }}</option>
+                    {% endfor %}
+                  </select>
                   <button type="button" class="btn btn-outline-danger remove-reward-category" aria-label="Remove reward category">&times;</button>
                 </div>
               </template>
