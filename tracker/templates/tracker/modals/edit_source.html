@@ -9,7 +9,43 @@
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
-            <input type="text" name="name" id="editSourceName" class="form-control" required>
+            <div class="mb-3">
+              <label for="editSourceName" class="form-label">Source Name</label>
+              <input type="text" name="name" id="editSourceName" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label for="editSourceAnnualFee" class="form-label">Annual Fee</label>
+              <input type="number" name="annual_fee" id="editSourceAnnualFee" class="form-control" step="0.01" min="0">
+            </div>
+            <div class="mb-3">
+              <label for="editSourceRewardType" class="form-label">Reward Type</label>
+              <select name="reward_type" id="editSourceRewardType" class="form-select">
+                <option value="none">None</option>
+                <option value="cashback">Cashback</option>
+                <option value="points">Points</option>
+                <option value="miles">Miles</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Reward Categories</label>
+              <div class="d-flex gap-2 mb-2">
+                <select id="rewardCategorySelect" class="form-select">
+                  <option value="">Add category...</option>
+                  {% for category in categories %}
+                    <option value="{{ category.id }}">{{ category.name }}</option>
+                  {% endfor %}
+                </select>
+                <button type="button" class="btn btn-outline-secondary" id="addRewardCategoryBtn">Add</button>
+              </div>
+              <div id="rewardCategoryList"></div>
+              <template id="rewardCategoryRowTemplate">
+                <div class="input-group mb-2 reward-category-row" data-category-id="">
+                  <span class="input-group-text reward-category-name"></span>
+                  <input type="number" class="form-control reward-multiplier-input" step="0.01" min="0" placeholder="Multiplier">
+                  <button type="button" class="btn btn-outline-danger remove-reward-category" aria-label="Remove reward category">&times;</button>
+                </div>
+              </template>
+            </div>
           </div>
           <div class="modal-footer">
             <button type="submit" class="btn btn-primary">Save changes</button>

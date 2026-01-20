@@ -55,6 +55,20 @@
       if (ctx.type !== 'data') return 150;
       return 150 + ctx.dataIndex * 60;
     };
+    const barInteraction = { mode: 'index', intersect: false };
+    if (window.Chart) {
+      if (Chart.overrides) {
+        Chart.overrides.bar = Chart.overrides.bar || {};
+        Chart.overrides.bar.interaction = barInteraction;
+        Chart.overrides.bar.hover = barInteraction;
+      }
+      if (Chart.defaults && typeof Chart.defaults.set === 'function') {
+        Chart.defaults.set('bar', {
+          interaction: barInteraction,
+          hover: barInteraction
+        });
+      }
+    }
 
     new Chart(categoryCtx, {
       type: 'bar',

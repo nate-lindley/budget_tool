@@ -32,7 +32,7 @@
                   <tr>
                     <td>{{ source.name }}</td>
                     <td>
-                      <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}">Edit</button>
+                      <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}" data-annual-fee="{{ source.annual_fee }}" data-reward-type="{{ source.reward_type }}">Edit</button>
                       <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_source' source.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
                     </td>
                   </tr>
@@ -124,17 +124,91 @@
 {% endblock %}
 
 {% block scripts %}
+  {{ source_reward_map|json_script:"sourceRewardMap" }}
+  {{ categories_data|json_script:"categoriesData" }}
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       const editSourceButtons = document.querySelectorAll('.edit-source-btn')
       const editSourceForm = document.getElementById('editSourceForm')
       const nameInput = document.getElementById('editSourceName')
+      const annualFeeInput = document.getElementById('editSourceAnnualFee')
+      const rewardTypeInput = document.getElementById('editSourceRewardType')
+      const rewardMapElement = document.getElementById('sourceRewardMap')
+      const rewardMap = rewardMapElement ? JSON.parse(rewardMapElement.textContent) : {}
+      const categoriesElement = document.getElementById('categoriesData')
+      const categoriesData = categoriesElement ? JSON.parse(categoriesElement.textContent) : []
+      const categoryNameMap = categoriesData.reduce((acc, category) => {
+        acc[String(category.id)] = category.name
+        return acc
+      }, {})
+      const rewardCategoryList = document.getElementById('rewardCategoryList')
+      const rewardCategorySelect = document.getElementById('rewardCategorySelect')
+      const addRewardCategoryBtn = document.getElementById('addRewardCategoryBtn')
+      const rewardCategoryRowTemplate = document.getElementById('rewardCategoryRowTemplate')
+
+      const addRewardCategoryRow = (categoryId, multiplierValue) => {
+        if (!rewardCategoryRowTemplate || !rewardCategoryList) {
+          return
+        }
+        if (rewardCategoryList.querySelector(`[data-category-id="${categoryId}"]`)) {
+          return
+        }
+        const categoryName = categoryNameMap[categoryId] || 'Category'
+        const row = rewardCategoryRowTemplate.content.cloneNode(true)
+        const rowEl = row.querySelector('.reward-category-row')
+        const nameEl = row.querySelector('.reward-category-name')
+        const inputEl = row.querySelector('.reward-multiplier-input')
+        const removeBtn = row.querySelector('.remove-reward-category')
+        if (rowEl) {
+          rowEl.setAttribute('data-category-id', categoryId)
+        }
+        if (nameEl) {
+          nameEl.textContent = categoryName
+        }
+        if (inputEl) {
+          inputEl.name = `reward_multiplier_${categoryId}`
+          inputEl.setAttribute('data-category-id', categoryId)
+          inputEl.value = multiplierValue === undefined ? '' : multiplierValue
+        }
+        if (removeBtn && rowEl) {
+          removeBtn.addEventListener('click', () => {
+            rowEl.remove()
+          })
+        }
+        rewardCategoryList.appendChild(row)
+      }
+
+      if (addRewardCategoryBtn && rewardCategorySelect) {
+        addRewardCategoryBtn.addEventListener('click', () => {
+          const selectedId = rewardCategorySelect.value
+          if (!selectedId) {
+            return
+          }
+          addRewardCategoryRow(selectedId, '')
+          rewardCategorySelect.value = ''
+        })
+      }
 
       editSourceButtons.forEach((button) => {
         button.addEventListener('click', () => {
           const sourceId = button.getAttribute('data-id')
           const sourceName = button.getAttribute('data-name')
+          const sourceAnnualFee = button.getAttribute('data-annual-fee')
+          const sourceRewardType = button.getAttribute('data-reward-type')
+          const sourceRewardMap = rewardMap[sourceId] || {}
           nameInput.value = sourceName
+          if (annualFeeInput) {
+            annualFeeInput.value = sourceAnnualFee
+          }
+          if (rewardTypeInput) {
+            rewardTypeInput.value = sourceRewardType
+          }
+          if (rewardCategoryList) {
+            rewardCategoryList.innerHTML = ''
+          }
+          Object.keys(sourceRewardMap).forEach((categoryId) => {
+            addRewardCategoryRow(categoryId, sourceRewardMap[categoryId])
+          })
           editSourceForm.action = `{% url 'edit_source' 0 %}`.replace(/0/, sourceId)
         })
       })

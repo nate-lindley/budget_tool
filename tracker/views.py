@@ -178,6 +178,12 @@ def settings_page(request):
         category.annual_negative_budget = category.annual_budget * -1
         total_budget += category.budget  # Sum the annual budgets for all categories
     sources = Source.objects.all()
+    categories_data = list(categories.values('id', 'name'))
+    reward_category_map = {}
+    for reward_category in RewardCategory.objects.select_related('source', 'category'):
+        source_id = str(reward_category.source_id)
+        category_id = str(reward_category.category_id)
+        reward_category_map.setdefault(source_id, {})[category_id] = float(reward_category.multiplier)
     today = datetime.now().strftime("%Y-%m-%d")  # Get today's date in the format YYYY-MM-DD for any future use in the template
     # categories = list(categories)  # Convert the queryset to a list for easier manipulation
     total = ({'name': 'Total', 'budget': total_budget, 'annual_budget': total_budget*12, 'negative_budget':total_budget*-1, 'annual_negative_budget':total_budget*-12})  # Append the total budget to the categories list
@@ -186,7 +192,9 @@ def settings_page(request):
         'categories': categories,  # Pass all categories to the template
         'sources': sources,  # Pass all sources to the template
         'today': today,  # Pass today's date to the template for any future use
-        'total': total
+        'total': total,
+        'source_reward_map': reward_category_map,
+        'categories_data': categories_data
     }
     return render(request, "tracker/settings.html", context)
 
@@ -204,8 +212,34 @@ def edit_source(request, source_id):
         # If the request is a POST, update the source name
         if 'name' in request.POST and request.POST['name']:
             source.name = request.POST['name']
-            source.save()  # Save the updated source to the database
-            return HttpResponseRedirect("/settings/")
+        if 'annual_fee' in request.POST and request.POST['annual_fee'] != "":
+            try:
+                source.annual_fee = float(request.POST['annual_fee'])
+            except ValueError:
+                print("Invalid annual fee value")
+        if 'reward_type' in request.POST and request.POST['reward_type']:
+            source.reward_type = request.POST['reward_type']
+        source.save()  # Save the updated source to the database
+        posted_multiplier_keys = [key for key in request.POST if key.startswith("reward_multiplier_")]
+        posted_category_ids = {key.split("reward_multiplier_")[-1] for key in posted_multiplier_keys}
+        for reward_category in RewardCategory.objects.filter(source=source):
+            if str(reward_category.category_id) not in posted_category_ids:
+                reward_category.delete()
+        for multiplier_key in posted_multiplier_keys:
+            category_id = multiplier_key.split("reward_multiplier_")[-1]
+            multiplier_value = request.POST.get(multiplier_key, "").strip()
+            if multiplier_value == "":
+                RewardCategory.objects.filter(source=source, category_id=category_id).delete()
+                continue
+            try:
+                multiplier = float(multiplier_value)
+            except ValueError:
+                print("Invalid reward multiplier value")
+                continue
+            reward_category, _ = RewardCategory.objects.get_or_create(source=source, category_id=category_id)
+            reward_category.multiplier = multiplier
+            reward_category.save()
+        return HttpResponseRedirect("/settings/")
     
     # Render the edit source template with the current source details
     context = {'source': source}
@@ -637,11 +671,31 @@ from calendar import month_name
 from .models import Transaction, Category
 
 def ytd_report(request):
-    year = datetime.now().year
-    current_month = datetime.now().month
+    def shift_month(year, month, delta):
+        total = (year * 12) + (month - 1) + delta
+        new_year = total // 12
+        new_month = (total % 12) + 1
+        return new_year, new_month
 
-    # Transactions for the year
-    transactions = Transaction.objects.filter(date__year=year, date__month__lte=current_month)
+    now = datetime.now()
+    year = now.year
+    current_month = now.month
+    view_mode = request.GET.get("view", "ytd")
+    if view_mode not in {"ytd", "ttm"}:
+        view_mode = "ytd"
+
+    if view_mode == "ttm":
+        months = [shift_month(year, current_month, -offset) for offset in range(11, -1, -1)]
+        start_year, start_month = months[0]
+        start_date = datetime(start_year, start_month, 1).date()
+        end_date = now.date()
+        months_count = 12
+        transactions = Transaction.objects.filter(date__gte=start_date, date__lte=end_date)
+    else:
+        months = [(year, month) for month in range(1, current_month + 1)]
+        months_count = current_month
+        # Transactions for the year
+        transactions = Transaction.objects.filter(date__year=year, date__month__lte=current_month)
 
     # Total spent per category (excluding income)
     spending_data = (
@@ -652,7 +706,7 @@ def ytd_report(request):
 
     income_data = (
         transactions.filter(category__name__iexact='income')
-        .values('category__name', 'category__budget')
+        .values('category__name', 'category__budget', 'category__id')
         .annotate(total=Sum('amount'))
     )
 
@@ -661,7 +715,7 @@ def ytd_report(request):
     total_budget = 0
     category_pie_data = []
     for entry in spending_data:
-        avg_per_month = entry['total'] / current_month
+        avg_per_month = entry['total'] / months_count
         budget = entry['category__budget'] or 0
         avg_surplus = budget - avg_per_month
         ytd_data.append({
@@ -672,7 +726,7 @@ def ytd_report(request):
             'avg_per_month': avg_per_month,
             'budget': budget, 
             'avg_surplus': avg_surplus,
-            'total_surplus': avg_surplus * current_month,
+            'total_surplus': avg_surplus * months_count,
         })
         category_pie_data.append({
             "label": entry["category__name"],
@@ -688,52 +742,61 @@ def ytd_report(request):
 
     total_data = {
         'category__name': 'Total Spend',
-        'total': (total_spend * current_month),
+        'total': (total_spend * months_count),
         'annual_budget': (total_budget * 12),
         'avg_per_month': total_spend,
         'budget': total_budget,
         'avg_surplus': (total_budget - total_spend),
-        'total_surplus': ((total_budget - total_spend) * current_month)
+        'total_surplus': ((total_budget - total_spend) * months_count)
     }
 
     # print(f'total_spend: {total_spend}')
     # print(f'total_budget: {total_budget}')
     for entry in income_data:
-        avg_per_month = entry['total'] / current_month
+        avg_per_month = entry['total'] / months_count
         budget = -1*entry['category__budget'] or 0
         avg_surplus = -1*(budget - avg_per_month)
         # print(f'income: {avg_per_month}')
         income_data = {
             'category__name': entry['category__name'],
             'total': entry['total'],
+            'category__id': entry['category__id'],
             'annual_budget': entry['category__budget'] * -12 if entry['category__budget'] else 0,
             'avg_per_month': avg_per_month,
             'budget': budget,
             'avg_surplus': avg_surplus,
-            'total_surplus': avg_surplus * current_month,
+            'total_surplus': avg_surplus * months_count,
         }
     savings_data = {
         'category__name': 'Savings',
-        'total': income_data['total'] - (total_spend * current_month),
+        'total': income_data['total'] - (total_spend * months_count),
         'annual_budget': income_data['annual_budget'] - (total_budget * 12),
         'avg_per_month': income_data['avg_per_month'] - total_spend,
         'budget': income_data['budget'] - total_budget,
         'avg_surplus': (income_data['avg_surplus'] + (total_budget - total_spend)),
-        'total_surplus': (income_data['total_surplus'] + ((total_budget - total_spend) * current_month))
+        'total_surplus': (income_data['total_surplus'] + ((total_budget - total_spend) * months_count))
     }
     # Net savings = income - spending for each month
     savings_chart_data = []
     savings_history = []
 
-    for month in range(1, current_month + 1):
+    for chart_year, chart_month in months:
+        if view_mode == "ttm":
+            month_label = f"{calendar.month_abbr[chart_month]} '{str(chart_year)[-2:]}"
+        else:
+            month_label = month_name[chart_month][:3]
         income = transactions.filter(
-            date__month=month,
+            date__year=chart_year,
+            date__month=chart_month,
             category__name__iexact='income'
         ).aggregate(total=Sum('amount'))['total'] or 0 
 
         spend = transactions.exclude(
             category__name__iexact='income'
-        ).filter(date__month=month).aggregate(total=Sum('amount'))['total'] or 0
+        ).filter(
+            date__year=chart_year,
+            date__month=chart_month
+        ).aggregate(total=Sum('amount'))['total'] or 0
 
         savings = income + spend
         savings_history.append(savings)
@@ -742,7 +805,7 @@ def ytd_report(request):
         running_average = sum(recent_history) / len(recent_history)
 
         savings_chart_data.append({
-            'month': month_name[month][:3],
+            'month': month_label,
             'income': float(round(income, 2)),
             'spend': float(round(spend, 2)),
             'savings': float(round(savings, 2)),
@@ -758,6 +821,10 @@ def ytd_report(request):
         'savings_data': savings_data,
         'year': year,
         'category_pie_data': category_pie_data,
+        'view_mode': view_mode,
+        'page_title': 'Trailing 12 Months Tracker' if view_mode == 'ttm' else 'Year-to-Date Tracker',
+        'overview_title': 'Trailing 12 Months Spending Overview' if view_mode == 'ttm' else 'Year-to-Date Spending Overview',
+        'period_label': 'Trailing 12 Months' if view_mode == 'ttm' else 'YTD',
     }
 
     return render(request, 'tracker/ytd.html', context)

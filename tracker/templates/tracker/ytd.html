@@ -3,11 +3,15 @@
 {% load humanize %}
 {% load number_formatting %}
 
-{% block title %}Year-to-Date Tracker{% endblock %}
+{% block title %}{{ page_title }}{% endblock %}
 
 {% block content %}
   <div class="section-header">
-    <h2>Year-to-Date Spending Overview</h2>
+    <h2>{{ overview_title }}</h2>
+    <div class="btn-group mt-2" role="group" aria-label="View selector">
+      <a class="btn btn-sm {% if view_mode == 'ytd' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/ytd_report/">YTD</a>
+      <a class="btn btn-sm {% if view_mode == 'ttm' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/ytd_report/?view=ttm">Trailing 12 Months</a>
+    </div>
   </div>
 
   <div class="charts-row">
@@ -16,7 +20,7 @@
       <canvas id="savingsChart"></canvas>
     </div>
     <div class="chart-card">
-      <h5>YTD Spend by Category</h5>
+      <h5>{{ period_label }} Spend by Category</h5>
       <canvas id="categoryPieChart"></canvas>
     </div>
   </div>
@@ -104,6 +108,20 @@
         window.location.href = row.dataset.href;
       });
     });
+    const barInteraction = { mode: 'index', intersect: false };
+    if (window.Chart) {
+      if (Chart.overrides) {
+        Chart.overrides.bar = Chart.overrides.bar || {};
+        Chart.overrides.bar.interaction = barInteraction;
+        Chart.overrides.bar.hover = barInteraction;
+      }
+      if (Chart.defaults && typeof Chart.defaults.set === 'function') {
+        Chart.defaults.set('bar', {
+          interaction: barInteraction,
+          hover: barInteraction
+        });
+      }
+    }
 
     new Chart(document.getElementById('savingsChart'), {
       type: 'bar',
