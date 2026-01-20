@@ -5,6 +5,13 @@ from django.contrib.postgres.fields import ArrayField
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
     budget = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    reporting_category = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reporting_children"
+    )
 
     class Meta:
         """

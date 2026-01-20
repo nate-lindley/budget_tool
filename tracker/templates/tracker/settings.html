@@ -80,7 +80,7 @@
                       {% endif %}
                     </td>
                     <td>
-                      <button class="btn btn-sm btn-warning edit-category-btn" data-bs-toggle="modal" data-bs-target="#editCategoryModal" data-id="{{ category.id }}" data-name="{{ category.name }}" data-amount="{{ category.budget }}">Edit</button>
+                      <button class="btn btn-sm btn-warning edit-category-btn" data-bs-toggle="modal" data-bs-target="#editCategoryModal" data-id="{{ category.id }}" data-name="{{ category.name }}" data-amount="{{ category.budget }}" data-reporting-category="{{ category.reporting_category_id|default_if_none:'' }}">Edit</button>
                       <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_category' category.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
                     </td>
                   </tr>
@@ -220,14 +220,19 @@
       const editCategoryForm = document.getElementById('editCategoryForm')
       const nameInput = document.getElementById('editCategoryName')
       const amountInput = document.getElementById('editCategoryAmount')
+      const reportingInput = document.getElementById('editCategoryReporting')
 
       editCategoryButtons.forEach((button) => {
         button.addEventListener('click', () => {
           const categoryId = button.getAttribute('data-id')
           const categoryName = button.getAttribute('data-name')
           const categoryAmount = button.getAttribute('data-amount')
+          const categoryReporting = button.getAttribute('data-reporting-category')
           nameInput.value = categoryName
           amountInput.value = categoryAmount
+          if (reportingInput) {
+            reportingInput.value = categoryReporting || ''
+          }
           editCategoryForm.action = `{% url 'edit_category' 0 %}`.replace(/0/, categoryId)
         })
       })

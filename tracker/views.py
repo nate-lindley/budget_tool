@@ -275,6 +275,13 @@ def edit_category(request, category_id):
                 # print(category.budget)
             except ValueError:
                 print("Invalid budget value")  # Handle invalid budget input
+        if 'reporting_category' in request.POST:
+            reporting_category_id = request.POST.get('reporting_category') or None
+            if reporting_category_id:
+                category.reporting_category_id = int(reporting_category_id)
+            else:
+                category.reporting_category = None
+            category.save()
         return HttpResponseRedirect("/settings/")  # Redirect to the settings page after saving
 
     # Get the referring URL or use a default if it's not available
