@@ -1,0 +1,73 @@
+<div class="modal fade" id="addFromRecurringModal" tabindex="-1" aria-labelledby="addFromRecurringLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="addFromRecurringForm">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addFromRecurringLabel">Add Upcoming Transaction</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="addFromRecurringDescription" class="form-label">Description</label>
+                        <input type="text" class="form-control" id="addFromRecurringDescription" name="description" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addFromRecurringAmount" class="form-label">Amount</label>
+                        <input type="text" class="form-control" id="addFromRecurringAmount" name="amount" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addFromRecurringDate" class="form-label">Date</label>
+                        <input type="date" class="form-control" id="addFromRecurringDate" name="date" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addFromRecurringCategory" class="form-label">Category</label>
+                        <select class="form-select" id="addFromRecurringCategory" name="category">
+                            <option value="">None</option>
+                            {% for category in categories %}
+                                <option value="{{ category.id }}">{{ category.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addFromRecurringSource" class="form-label">Source</label>
+                        <select class="form-select" id="addFromRecurringSource" name="source">
+                            <option value="">None</option>
+                            {% for source in sources %}
+                                <option value="{{ source.id }}">{{ source.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Transaction</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const addFromRecurringForm = document.getElementById('addFromRecurringForm');
+    if (addFromRecurringForm) {
+        addFromRecurringForm.addEventListener('submit', function(e) {
+            const amountInput = document.getElementById('addFromRecurringAmount');
+            const originalValue = amountInput.value;
+            try {
+                if (!/^[\d\s+\-*/.()]+$/.test(originalValue)) {
+                    throw new Error("Invalid characters in amount.");
+                }
+                const evaluated = Function('"use strict"; return (' + originalValue + ')')();
+                if (isNaN(evaluated) || !isFinite(evaluated)) {
+                    throw new Error("Invalid math expression.");
+                }
+                amountInput.value = parseFloat(evaluated).toFixed(2);
+            } catch (error) {
+                e.preventDefault();
+                alert("Please enter a valid math expression for the amount.");
+            }
+        });
+    }
+});
+</script>

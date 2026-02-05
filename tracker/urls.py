@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path("", views.index, name="index"),
     path("add_transaction/", views.add_transaction, name="add_transaction"),
+    path("add_reward_credit/", views.add_reward_credit, name="add_reward_credit"),
     path("add_category/", views.add_category, name="add_category"),
     path("settings/", views.settings_page, name="settings_page"),
     path("add_source/", views.add_source, name="add_source"),
@@ -20,4 +21,8 @@ urlpatterns = [
     path("mtd_report/", views.mtd_report, name="mtd_report"),
     path("rewards/", views.rewards_tracker, name="rewards_tracker"),
     path("category_year/", views.category_year_view, name="category_year"),
+    path("add_recurring/", views.add_recurring_transaction, name="add_recurring"),
+    path("edit_recurring/<int:recurring_id>/", views.edit_recurring_transaction, name="edit_recurring"),
+    path("delete_recurring/<int:recurring_id>/", views.delete_recurring_transaction, name="delete_recurring"),
+    path("add_from_recurring/<int:recurring_id>/", views.add_from_recurring, name="add_from_recurring"),
 ]

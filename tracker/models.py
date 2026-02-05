@@ -23,7 +23,19 @@ class Category(models.Model):
 class Source(models.Model):
     name = models.CharField(max_length=100, unique=True)
     annual_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    reward_type = models.CharField(max_length=100, default='cashback', choices=[('cashback', 'Cashback'), ('none', 'None'), ('miles', 'Miles')])
+    reward_type = models.CharField(
+        max_length=100,
+        default='cashback',
+        choices=[
+            ('cashback', 'Cashback'),
+            ('none', 'None'),
+            ('miles', 'Miles'),
+            ('card_cash_miles', 'Card Cash + Miles'),
+        ],
+    )
+    signup_bonus_miles = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    signup_bonus_min_spend = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    signup_bonus_awarded_on = models.DateField(null=True, blank=True)
 
     class Meta:
         """
@@ -45,6 +57,36 @@ class RewardCategory(models.Model):
         """
         ordering = ['source__name', 'category__name']
 
+class RecurringTransaction(models.Model):
+    FREQUENCY_CHOICES = [
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+        ('yearly', 'Yearly'),
+    ]
+
+    description = models.CharField(max_length=200)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
+    source = models.ForeignKey(Source, on_delete=models.SET_NULL, null=True, blank=True)
+    frequency = models.CharField(max_length=10, choices=FREQUENCY_CHOICES, default='monthly')
+    interval = models.PositiveIntegerField(default=1)
+    day_of_month = models.PositiveIntegerField(default=1)
+    day_of_week = models.PositiveIntegerField(null=True, blank=True)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    last_generated = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['description']
+
+    def get_frequency_display_with_interval(self):
+        if self.interval == 1:
+            return self.get_frequency_display()
+        unit = {'weekly': 'weeks', 'monthly': 'months', 'yearly': 'years'}[self.frequency]
+        return f"Every {self.interval} {unit}"
+
+
 class Transaction(models.Model):
     """
     Model representing a financial transaction.
@@ -52,8 +94,10 @@ class Transaction(models.Model):
     date = models.DateField()
     description = models.CharField(max_length=200)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    reimbursement = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, null=True, blank=True)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, default=None, blank=True, null=True)
     source = models.ForeignKey(Source, on_delete=models.SET_NULL, default=None, blank=True, null=True)
+    recurring_source = models.ForeignKey(RecurringTransaction, on_delete=models.SET_NULL, null=True, blank=True)
 
     def __str__(self):
         """

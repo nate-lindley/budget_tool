@@ -11,6 +11,48 @@
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addTransactionModal">Add Transaction</button>
   </div>
 
+  {% if upcoming_transactions %}
+  <div class="card-panel mb-4">
+    <h4 class="mb-3">Upcoming Recurring Transactions <small class="text-muted">(next 7 days)</small></h4>
+    <div class="table-responsive">
+      <table class="table table-striped align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Description</th>
+            <th>Amount</th>
+            <th>Due Date</th>
+            <th>Category</th>
+            <th>Source</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in upcoming_transactions %}
+            <tr>
+              <td>{{ item.recurring.description }}</td>
+              <td>${{ item.recurring.amount|floatformat:2 }}</td>
+              <td>{{ item.date }}</td>
+              <td>{{ item.recurring.category.name|default:"—" }}</td>
+              <td>{{ item.recurring.source.name|default:"—" }}</td>
+              <td>
+                <button class="btn btn-sm btn-success add-from-recurring-btn" data-bs-toggle="modal" data-bs-target="#addFromRecurringModal"
+                  data-id="{{ item.recurring.id }}"
+                  data-description="{{ item.recurring.description }}"
+                  data-amount="{{ item.recurring.amount }}"
+                  data-date="{{ item.date|date:'Y-m-d' }}"
+                  data-category="{{ item.recurring.category_id|default_if_none:'' }}"
+                  data-source="{{ item.recurring.source_id|default_if_none:'' }}">
+                  Add Now
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="card-panel">
     <h4 class="mb-3">Transactions</h4>
     <div class="table-responsive">
@@ -72,8 +114,8 @@
             {% for transaction in transactions %}
               <tr>
                 <td>{{ transaction.description }}</td>
-                <td class="{% if transaction.amount < 0 %}text-negative{% else %}text-neutral{% endif %}">
-                  {{ transaction.amount|dollar_format }}
+                <td class="{% if transaction.net_amount < 0 %}text-negative{% else %}text-neutral{% endif %}">
+                  {{ transaction.net_amount|dollar_format }}
                 </td>
                 <td>{{ transaction.date }}</td>
                 <td>{{ transaction.category.name }}</td>
@@ -83,6 +125,7 @@
                     data-id="{{ transaction.id }}"
                     data-description="{{ transaction.description }}"
                     data-amount="{{ transaction.amount }}"
+                    data-reimbursement="{{ transaction.reimbursement|default_if_none:'' }}"
                     data-date="{{ transaction.date }}"
                     data-category="{{ transaction.category.id }}"
                     data-source="{{ transaction.source.id }}">
@@ -156,6 +199,7 @@
 
   {% include './modals/add_transaction.html' %}
   {% include './modals/edit_transaction.html' %}
+  {% include './modals/add_from_recurring.html' %}
   {% include './modals/confirm_delete.html' %}
 {% endblock %}
 
@@ -167,6 +211,7 @@
 
       const description = document.getElementById('editDescription');
       const amount = document.getElementById('editAmount');
+      const reimbursement = document.getElementById('editReimbursement');
       const date = document.getElementById('editDate');
       const category = document.getElementById('editCategory');
       const source = document.getElementById('editSource');
@@ -180,6 +225,7 @@
 
           description.value = button.getAttribute('data-description');
           amount.value = button.getAttribute('data-amount');
+          reimbursement.value = button.getAttribute('data-reimbursement') || '';
           date.value = formatted;
           category.value = button.getAttribute('data-category');
           source.value = button.getAttribute('data-source');
@@ -196,6 +242,24 @@
         button.addEventListener('click', () => {
           const url = button.getAttribute('data-url');
           deleteForm.action = url;
+        });
+      });
+    });
+  </script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const addFromRecurringButtons = document.querySelectorAll('.add-from-recurring-btn');
+      const addFromRecurringForm = document.getElementById('addFromRecurringForm');
+
+      addFromRecurringButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const id = button.getAttribute('data-id');
+          addFromRecurringForm.action = `{% url 'add_from_recurring' 0 %}`.replace(/0/, id);
+          document.getElementById('addFromRecurringDescription').value = button.getAttribute('data-description');
+          document.getElementById('addFromRecurringAmount').value = button.getAttribute('data-amount');
+          document.getElementById('addFromRecurringDate').value = button.getAttribute('data-date');
+          document.getElementById('addFromRecurringCategory').value = button.getAttribute('data-category') || '';
+          document.getElementById('addFromRecurringSource').value = button.getAttribute('data-source') || '';
         });
       });
     });

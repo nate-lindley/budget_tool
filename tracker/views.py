@@ -1,7 +1,7 @@
 from django.shortcuts import render, HttpResponseRedirect
 from .models import *
-from datetime import datetime, timedelta
-from django.db.models import Sum, Q, Exists, OuterRef, Min, Max
+from datetime import datetime, timedelta, date
+from django.db.models import Sum, Q, Exists, OuterRef, Min, Max, F, Value, DecimalField, Case, When, BooleanField
 import calendar
 from django.db.models.functions import ExtractYear, ExtractMonth, Coalesce
 import csv
@@ -15,6 +15,12 @@ def annotate_reporting_category(queryset):
         reporting_category_id=Coalesce('category__reporting_category_id', 'category_id'),
         reporting_category_name=Coalesce('category__reporting_category__name', 'category__name'),
         reporting_category_budget=Coalesce('category__reporting_category__budget', 'category__budget'),
+    )
+
+
+def annotate_net_amount(queryset):
+    return queryset.annotate(
+        net_amount=F('amount') + Coalesce('reimbursement', Value(0, output_field=DecimalField()))
     )
 
 
@@ -48,44 +54,51 @@ def index(request):
     """
     View function for the index page of the budget tool.
     """
+    # Auto-generate due recurring transactions on page load
+    generate_due_transactions()
+
     category_filter = request.GET.get('category')
     source_filter = request.GET.get('source')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
 
-    transactions_list = Transaction.objects.all().order_by('-date')  # or your preferred ordering
+    transactions_list = annotate_net_amount(
+        Transaction.objects.all()
+    ).order_by('-date')
 
     if category_filter:
-        transactions_list = transactions_list.filter(category__id=category_filter)
+        transactions_list = transactions_list.filter(
+            Q(category__reporting_category_id=category_filter) | Q(category__id=category_filter)
+        )
     if source_filter:
         transactions_list = transactions_list.filter(source__id=source_filter)
     if start_date:
         transactions_list = transactions_list.filter(date__gte=start_date)
     if end_date:
         transactions_list = transactions_list.filter(date__lte=end_date)
-    
-    paginator = Paginator(transactions_list, 25)  # Show 25 per page
+
+    paginator = Paginator(transactions_list, 25)
 
     page_number = request.GET.get('page',1)
     transactions = paginator.get_page(page_number)
-    # Retrieve all categories from the database
-    categories = Category.objects.all()  # Get all categories from the database
-    sources = Source.objects.all()  # Retrieve all sources from the database, if needed for future use
-    # Pass the transactions and categories to the template context
-    today = datetime.now().strftime("%Y-%m-%d")  # Get today's date in the format YYYY-MM-DD for any future use in the template
+    categories = Category.objects.all()
+    sources = Source.objects.all()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Get upcoming recurring transactions (next 7 days)
+    upcoming_transactions = get_upcoming_transactions()
 
     context = {
-        'transactions': transactions,  # Pass the latest transactions to the template
-        'categories': categories,  # Pass all categories to the template
-        'sources': sources,  # Pass all sources to the template, if needed
-        'today': today,  # Pass today's date to the template for any future use
+        'transactions': transactions,
+        'categories': categories,
+        'sources': sources,
+        'today': today,
         'selected_category': category_filter,
         'selected_source': source_filter,
         'start_date': start_date,
         'end_date': end_date,
+        'upcoming_transactions': upcoming_transactions,
     }
-    # print(context)
-    # Render the index.html template
     return render(request, "tracker/index.html", context)
 
 def add_transaction(request):
@@ -139,7 +152,23 @@ def add_transaction(request):
             print("Invalid amount value")
             return HttpResponseRedirect("/")
 
-    new_transaction = Transaction(description=request.POST['description'],amount=amount,date=request.POST['date'],category=category, source=source)
+    reimbursement = 0
+    reimbursement_value = request.POST.get('reimbursement')
+    if reimbursement_value:
+        try:
+            reimbursement = float(reimbursement_value)
+        except ValueError:
+            print("Invalid reimbursement value")
+            return HttpResponseRedirect("/")
+
+    new_transaction = Transaction(
+        description=request.POST['description'],
+        amount=amount,
+        reimbursement=reimbursement,
+        date=request.POST['date'],
+        category=category,
+        source=source
+    )
     new_transaction.save()  # Save the new transaction to the database
 
     # Get the referring URL or use a default if it's not available
@@ -148,13 +177,364 @@ def add_transaction(request):
     # Redirect to the referring URL
     return HttpResponseRedirect(referring_url)
 
+def add_reward_credit(request):
+    if request.method != "POST":
+        return HttpResponseRedirect("/rewards/")
+
+    source_id = request.POST.get("source")
+    amount_value = request.POST.get("amount")
+    date_value = request.POST.get("date")
+    description = (request.POST.get("description") or "").strip()
+    reward_reason = (request.POST.get("reward_reason") or "").strip()
+    credit_type = (request.POST.get("credit_type") or "reward").strip()
+
+    if not source_id or not amount_value or not date_value or not is_valid_date(date_value):
+        return HttpResponseRedirect(request.META.get("HTTP_REFERER", "/rewards/"))
+
+    try:
+        source = Source.objects.get(id=source_id)
+    except Source.DoesNotExist:
+        return HttpResponseRedirect(request.META.get("HTTP_REFERER", "/rewards/"))
+
+    try:
+        amount = abs(float(amount_value))
+    except ValueError:
+        return HttpResponseRedirect(request.META.get("HTTP_REFERER", "/rewards/"))
+
+    if not description:
+        if credit_type == "card_cash":
+            description = "Card cash credit"
+        elif credit_type == "miles":
+            description = "Miles credit"
+        elif reward_reason == "signup":
+            description = "Signup bonus credit"
+        elif reward_reason == "anniversary":
+            description = "Anniversary bonus credit"
+        else:
+            description = "Reward credit"
+
+    if credit_type == "card_cash":
+        category_prefix = "card-cash-"
+    elif credit_type == "miles":
+        category_prefix = "miles-credit-"
+    else:
+        category_prefix = "credit-"
+
+    credit_category_name = f"{category_prefix}{source.name}"
+    credit_category, _ = Category.objects.get_or_create(
+        name=credit_category_name,
+        defaults={"budget": 0},
+    )
+    if credit_category.reporting_category_id is None:
+        income_category = Category.objects.filter(name__iexact="income").first()
+        if income_category:
+            credit_category.reporting_category = income_category
+            credit_category.save(update_fields=["reporting_category"])
+
+    Transaction.objects.create(
+        description=description,
+        amount=amount,
+        reimbursement=0,
+        date=date_value,
+        category=credit_category,
+        source=source,
+    )
+
+    return HttpResponseRedirect(request.META.get("HTTP_REFERER", "/rewards/"))
+
 def is_valid_date(date_str):
     try:
         datetime.strptime(date_str, "%Y-%m-%d")
         return True
     except ValueError:
         return False
-    
+
+
+def add_months(d, months):
+    month = d.month - 1 + months
+    year = d.year + month // 12
+    month = month % 12 + 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return d.replace(year=year, month=month, day=day)
+
+
+def get_next_occurrence(recurring):
+    if recurring.frequency == 'weekly':
+        if recurring.last_generated:
+            next_date = recurring.last_generated + timedelta(weeks=recurring.interval)
+        else:
+            next_date = recurring.start_date
+            if recurring.day_of_week is not None:
+                days_ahead = recurring.day_of_week - next_date.weekday()
+                if days_ahead < 0:
+                    days_ahead += 7
+                next_date = next_date + timedelta(days=days_ahead)
+        return next_date
+
+    elif recurring.frequency == 'monthly':
+        if recurring.last_generated:
+            next_date = add_months(recurring.last_generated, recurring.interval)
+        else:
+            next_date = recurring.start_date
+        day = min(recurring.day_of_month, calendar.monthrange(next_date.year, next_date.month)[1])
+        next_date = next_date.replace(day=day)
+        return next_date
+
+    elif recurring.frequency == 'yearly':
+        if recurring.last_generated:
+            next_date = add_months(recurring.last_generated, recurring.interval * 12)
+        else:
+            next_date = recurring.start_date
+        day = min(recurring.day_of_month, calendar.monthrange(next_date.year, next_date.month)[1])
+        next_date = next_date.replace(day=day)
+        return next_date
+
+    return None
+
+
+def generate_due_transactions():
+    today = date.today()
+    recurring_list = RecurringTransaction.objects.filter(is_active=True)
+
+    for recurring in recurring_list:
+        if recurring.end_date and recurring.end_date < today:
+            recurring.is_active = False
+            recurring.save()
+            continue
+
+        next_date = get_next_occurrence(recurring)
+
+        while next_date and next_date <= today:
+            if recurring.end_date and next_date > recurring.end_date:
+                recurring.is_active = False
+                recurring.save()
+                break
+            Transaction.objects.create(
+                description=recurring.description,
+                amount=recurring.amount,
+                date=next_date,
+                category=recurring.category,
+                source=recurring.source,
+                recurring_source=recurring,
+            )
+            recurring.last_generated = next_date
+            recurring.save()
+            next_date = get_next_occurrence(recurring)
+
+
+def get_upcoming_transactions():
+    today = date.today()
+    upcoming = []
+    for recurring in RecurringTransaction.objects.filter(is_active=True):
+        next_date = get_next_occurrence(recurring)
+        if next_date and today < next_date <= today + timedelta(days=7):
+            upcoming.append({
+                'recurring': recurring,
+                'date': next_date,
+            })
+    upcoming.sort(key=lambda x: x['date'])
+    return upcoming
+
+
+def add_recurring_transaction(request):
+    if request.method != "POST":
+        return HttpResponseRedirect("/settings/")
+
+    description = request.POST.get('description', '').strip()
+    amount_str = request.POST.get('amount', '').strip()
+    frequency = request.POST.get('frequency', 'monthly')
+    interval_str = request.POST.get('interval', '1')
+    day_of_month_str = request.POST.get('day_of_month', '1')
+    day_of_week_str = request.POST.get('day_of_week', '')
+    start_date_str = request.POST.get('start_date', '')
+    end_date_str = request.POST.get('end_date', '')
+
+    if not description or not amount_str or not start_date_str or not is_valid_date(start_date_str):
+        return HttpResponseRedirect("/settings/")
+
+    try:
+        amount = float(amount_str)
+    except ValueError:
+        return HttpResponseRedirect("/settings/")
+
+    try:
+        interval = int(interval_str)
+    except ValueError:
+        interval = 1
+
+    try:
+        day_of_month = int(day_of_month_str)
+    except ValueError:
+        day_of_month = 1
+
+    day_of_week = None
+    if day_of_week_str:
+        try:
+            day_of_week = int(day_of_week_str)
+        except ValueError:
+            pass
+
+    try:
+        category = Category.objects.get(id=request.POST.get('category'))
+    except (Category.DoesNotExist, ValueError, TypeError):
+        category = None
+
+    try:
+        source = Source.objects.get(id=request.POST.get('source'))
+    except (Source.DoesNotExist, ValueError, TypeError):
+        source = None
+
+    end_date = None
+    if end_date_str and is_valid_date(end_date_str):
+        end_date = end_date_str
+
+    RecurringTransaction.objects.create(
+        description=description,
+        amount=amount,
+        category=category,
+        source=source,
+        frequency=frequency,
+        interval=interval,
+        day_of_month=day_of_month,
+        day_of_week=day_of_week,
+        start_date=start_date_str,
+        end_date=end_date,
+    )
+
+    return HttpResponseRedirect("/settings/")
+
+
+def edit_recurring_transaction(request, recurring_id):
+    try:
+        recurring = RecurringTransaction.objects.get(id=recurring_id)
+    except RecurringTransaction.DoesNotExist:
+        return HttpResponseRedirect("/settings/")
+
+    if request.method != "POST":
+        return HttpResponseRedirect("/settings/")
+
+    description = request.POST.get('description', '').strip()
+    if description:
+        recurring.description = description
+
+    amount_str = request.POST.get('amount', '').strip()
+    if amount_str:
+        try:
+            recurring.amount = float(amount_str)
+        except ValueError:
+            pass
+
+    frequency = request.POST.get('frequency')
+    if frequency in ('weekly', 'monthly', 'yearly'):
+        recurring.frequency = frequency
+
+    interval_str = request.POST.get('interval', '')
+    if interval_str:
+        try:
+            recurring.interval = int(interval_str)
+        except ValueError:
+            pass
+
+    day_of_month_str = request.POST.get('day_of_month', '')
+    if day_of_month_str:
+        try:
+            recurring.day_of_month = int(day_of_month_str)
+        except ValueError:
+            pass
+
+    day_of_week_str = request.POST.get('day_of_week', '')
+    if day_of_week_str:
+        try:
+            recurring.day_of_week = int(day_of_week_str)
+        except ValueError:
+            pass
+    elif recurring.frequency != 'weekly':
+        recurring.day_of_week = None
+
+    start_date_str = request.POST.get('start_date', '')
+    if start_date_str and is_valid_date(start_date_str):
+        recurring.start_date = start_date_str
+
+    end_date_str = request.POST.get('end_date', '')
+    if end_date_str and is_valid_date(end_date_str):
+        recurring.end_date = end_date_str
+    elif not end_date_str:
+        recurring.end_date = None
+
+    is_active = request.POST.get('is_active')
+    if is_active is not None:
+        recurring.is_active = is_active == 'on'
+
+    try:
+        recurring.category = Category.objects.get(id=request.POST.get('category'))
+    except (Category.DoesNotExist, ValueError, TypeError):
+        recurring.category = None
+
+    try:
+        recurring.source = Source.objects.get(id=request.POST.get('source'))
+    except (Source.DoesNotExist, ValueError, TypeError):
+        recurring.source = None
+
+    recurring.save()
+    return HttpResponseRedirect("/settings/")
+
+
+def delete_recurring_transaction(request, recurring_id):
+    try:
+        recurring = RecurringTransaction.objects.get(id=recurring_id)
+        recurring.delete()
+    except RecurringTransaction.DoesNotExist:
+        pass
+    return HttpResponseRedirect("/settings/")
+
+
+def add_from_recurring(request, recurring_id):
+    if request.method != "POST":
+        return HttpResponseRedirect("/")
+
+    try:
+        recurring = RecurringTransaction.objects.get(id=recurring_id)
+    except RecurringTransaction.DoesNotExist:
+        return HttpResponseRedirect("/")
+
+    description = request.POST.get('description', '').strip() or recurring.description
+    amount_str = request.POST.get('amount', '').strip()
+    date_str = request.POST.get('date', '').strip()
+
+    try:
+        amount = float(amount_str) if amount_str else float(recurring.amount)
+    except ValueError:
+        amount = float(recurring.amount)
+
+    if not date_str or not is_valid_date(date_str):
+        next_date = get_next_occurrence(recurring)
+        date_str = next_date.isoformat() if next_date else date.today().isoformat()
+
+    try:
+        category = Category.objects.get(id=request.POST.get('category'))
+    except (Category.DoesNotExist, ValueError, TypeError):
+        category = recurring.category
+
+    try:
+        source = Source.objects.get(id=request.POST.get('source'))
+    except (Source.DoesNotExist, ValueError, TypeError):
+        source = recurring.source
+
+    Transaction.objects.create(
+        description=description,
+        amount=amount,
+        date=date_str,
+        category=category,
+        source=source,
+        recurring_source=recurring,
+    )
+
+    recurring.last_generated = date_str
+    recurring.save()
+
+    return HttpResponseRedirect("/")
+
+
 def add_category(request):
     """
     View function for adding a new category.
@@ -282,19 +662,28 @@ def settings_page(request):
         if quarter > 4:
             quarter = 1
             year += 1
-    today = datetime.now().strftime("%Y-%m-%d")  # Get today's date in the format YYYY-MM-DD for any future use in the template
-    # categories = list(categories)  # Convert the queryset to a list for easier manipulation
-    total = ({'name': 'Total', 'budget': total_budget, 'annual_budget': total_budget*12, 'negative_budget':total_budget*-1, 'annual_negative_budget':total_budget*-12})  # Append the total budget to the categories list
-    # Pass the categories and sources to the template context
+    today = datetime.now().strftime("%Y-%m-%d")
+    total = ({'name': 'Total', 'budget': total_budget, 'annual_budget': total_budget*12, 'negative_budget':total_budget*-1, 'annual_negative_budget':total_budget*-12})
+
+    recurring_transactions = RecurringTransaction.objects.filter(is_active=True)
+    recurring_with_next = []
+    for rt in recurring_transactions:
+        next_date = get_next_occurrence(rt)
+        recurring_with_next.append({
+            'recurring': rt,
+            'next_date': next_date,
+        })
+
     context = {
-        'categories': categories,  # Pass all categories to the template
+        'categories': categories,
         'reporting_categories': reporting_categories,
-        'sources': sources,  # Pass all sources to the template
-        'today': today,  # Pass today's date to the template for any future use
+        'sources': sources,
+        'today': today,
         'total': total,
         'source_reward_map': reward_category_map,
         'quarters': quarters,
-        'categories_data': categories_data
+        'categories_data': categories_data,
+        'recurring_transactions': recurring_with_next,
     }
     return render(request, "tracker/settings.html", context)
 
@@ -319,6 +708,16 @@ def edit_source(request, source_id):
                 print("Invalid annual fee value")
         if 'reward_type' in request.POST and request.POST['reward_type']:
             source.reward_type = request.POST['reward_type']
+        if 'signup_bonus_miles' in request.POST and request.POST['signup_bonus_miles'] != "":
+            try:
+                source.signup_bonus_miles = int(float(request.POST['signup_bonus_miles']))
+            except ValueError:
+                print("Invalid signup bonus miles value")
+        if 'signup_bonus_min_spend' in request.POST and request.POST['signup_bonus_min_spend'] != "":
+            try:
+                source.signup_bonus_min_spend = float(request.POST['signup_bonus_min_spend'])
+            except ValueError:
+                print("Invalid signup bonus min spend value")
         source.save()  # Save the updated source to the database
         posted_multiplier_keys = [key for key in request.POST if key.startswith("reward_multiplier_")]
         posted_category_ids = {key.split("reward_multiplier_")[-1] for key in posted_multiplier_keys}
@@ -415,6 +814,17 @@ def edit_transaction(request, transaction_id):
             # Handle invalid amount input
                 print(f"Invalid amount value {request.POST['amount']}")
                 return HttpResponseRedirect("/")
+        if 'reimbursement' in request.POST:
+            reimbursement_value = request.POST['reimbursement']
+            if reimbursement_value == "":
+                transaction.reimbursement = 0
+            else:
+                try:
+                    reimbursement = float(reimbursement_value)
+                    transaction.reimbursement = reimbursement
+                except ValueError:
+                    print(f"Invalid reimbursement value {request.POST['reimbursement']}")
+                    return HttpResponseRedirect("/")
         if 'date' in request.POST and is_valid_date(request.POST['date']):
             transaction.date = request.POST['date']
         if 'category' in request.POST:
@@ -423,7 +833,8 @@ def edit_transaction(request, transaction_id):
             transaction.source_id = request.POST['source']
         
         transaction.save()  # Save the updated transaction to the database
-        return HttpResponseRedirect("/")  # Redirect to the index page after saving
+        referring_url = request.META.get('HTTP_REFERER', '/')
+        return HttpResponseRedirect(referring_url)  # Redirect to the referring URL after saving
     
     # Render the edit transaction template with the current transaction details
     context = {'transaction': transaction}
@@ -517,7 +928,9 @@ def reports_view(request):
                 "cumulative": float(daily_total)
             })
     
-    base_transactions = Transaction.objects.filter(date__month=month, date__year=year)
+    base_transactions = annotate_net_amount(
+        Transaction.objects.filter(date__month=month, date__year=year)
+    )
     transactions = base_transactions.exclude(category__name__iexact='income').exclude(
         category__reporting_category__name__iexact='income'
     )
@@ -525,7 +938,7 @@ def reports_view(request):
     if income_total_amount is None:
         income_total = base_transactions.filter(
             Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income')
-        ).aggregate(total=Sum('amount'))
+        ).aggregate(total=Sum('net_amount'))
 
         income_total_amount = float(income_total['total']) if income_total['total'] else 0
     
@@ -533,7 +946,7 @@ def reports_view(request):
     pie_data = (
         annotate_reporting_category(transactions)
         .values("reporting_category_id", "reporting_category_name", "reporting_category_budget")
-        .annotate(total=Sum("amount") * -1)
+        .annotate(total=Sum("net_amount") * -1)
     )
 
     if final_line_data is None:
@@ -541,7 +954,7 @@ def reports_view(request):
         daily_totals = (
             transactions.order_by("date")
             .values("date")
-            .annotate(daily_total=Sum("amount"))
+            .annotate(daily_total=Sum("net_amount"))
         )
         cumulative_total = 0
         line_data = [{"date": datetime(year, month, 1).strftime("%Y-%m-%d"), "cumulative": 0}]
@@ -646,6 +1059,11 @@ def reports_view(request):
         "is_negative": False,
     })
 
+    table_data = sorted(
+        all_categories,
+        key=lambda item: (item.get("category__name") or "").lower(),
+    )
+
     # Convert line chart data to JSON-safe format
     line_data_safe = [
         {"date": item["date"], "cumulative": float(item["cumulative"])}
@@ -678,7 +1096,7 @@ def reports_view(request):
         "total_spent": total_spent,
         "pie_data": pie_data_safe,
         "line_data": line_data_safe,
-        "table_data": all_categories,
+        "table_data": table_data,
         "months": [(i, calendar.month_name[i]) for i in range(1, 13)],
         "years": list(year_values),
     }
@@ -809,12 +1227,16 @@ def ytd_report(request):
         start_date = datetime(start_year, start_month, 1).date()
         end_date = now.date()
         months_count = 12
-        transactions = Transaction.objects.filter(date__gte=start_date, date__lte=end_date)
+        transactions = annotate_net_amount(
+            Transaction.objects.filter(date__gte=start_date, date__lte=end_date)
+        )
     else:
         months = [(year, month) for month in range(1, current_month + 1)]
         months_count = current_month
         # Transactions for the year
-        transactions = Transaction.objects.filter(date__year=year, date__month__lte=current_month)
+        transactions = annotate_net_amount(
+            Transaction.objects.filter(date__year=year, date__month__lte=current_month)
+        )
 
     # Total spent per reporting category (excluding income)
     spending_data = (
@@ -824,7 +1246,7 @@ def ytd_report(request):
             )
         )
         .values('reporting_category_id', 'reporting_category_name', 'reporting_category_budget')
-        .annotate(total=Sum('amount') * -1)
+        .annotate(total=Sum('net_amount') * -1)
     )
 
     income_data = (
@@ -834,7 +1256,7 @@ def ytd_report(request):
             )
         )
         .values('reporting_category_id', 'reporting_category_name', 'reporting_category_budget')
-        .annotate(total=Sum('amount'))
+        .annotate(total=Sum('net_amount'))
     )
 
     ytd_data = []
@@ -916,14 +1338,14 @@ def ytd_report(request):
             date__year=chart_year,
             date__month=chart_month,
             category__name__iexact='income'
-        ).aggregate(total=Sum('amount'))['total'] or 0 
+        ).aggregate(total=Sum('net_amount'))['total'] or 0 
 
         spend = transactions.exclude(
             category__name__iexact='income'
         ).filter(
             date__year=chart_year,
             date__month=chart_month
-        ).aggregate(total=Sum('amount'))['total'] or 0
+        ).aggregate(total=Sum('net_amount'))['total'] or 0
 
         savings = income + spend
         savings_history.append(savings)
@@ -961,7 +1383,9 @@ def mtd_report(request):
     year = datetime.now().year
 
     # Transactions for the current month
-    transactions = Transaction.objects.filter(date__year=year, date__month=month)
+    transactions = annotate_net_amount(
+        Transaction.objects.filter(date__year=year, date__month=month)
+    )
 
     # Total spent per reporting category (excluding income)
     spending_data = (
@@ -971,7 +1395,7 @@ def mtd_report(request):
             )
         )
         .values('reporting_category_name', 'reporting_category_budget')
-        .annotate(total=Sum('amount') * -1)
+        .annotate(total=Sum('net_amount') * -1)
     )
 
     mtd_data = []
@@ -994,11 +1418,11 @@ def mtd_report(request):
         income = transactions.filter(
             date__day=day,
             category__name__iexact='income'
-        ).aggregate(total=Sum('amount'))['total'] or 0
+        ).aggregate(total=Sum('net_amount'))['total'] or 0
 
         spend = transactions.exclude(
             category__name__iexact='income'
-        ).filter(date__day=day).aggregate(total=Sum('amount'))['total'] or 0
+        ).filter(date__day=day).aggregate(total=Sum('net_amount'))['total'] or 0
 
         savings_chart_data.append({
             'day': day,
@@ -1042,14 +1466,69 @@ def rewards_tracker(request):
         selected_year = years[-1]
 
     sources = Source.objects.annotate(
-        has_rewards=Exists(RewardCategory.objects.filter(source=OuterRef('pk')))
+        has_rewards=Case(
+            When(Exists(RewardCategory.objects.filter(source=OuterRef('pk'))), then=Value(True)),
+            When(~Q(reward_type='none'), then=Value(True)),
+            default=Value(False),
+            output_field=BooleanField(),
+        )
     ).order_by('-has_rewards', 'name')
     sources_data = []
+    total_miles_earned = 0
+    total_cashback_earned = 0
+    total_credits_earned = 0
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    def cashback_label(value):
+        percent = value * 100
+        if percent.is_integer():
+            return f"{int(percent)}%"
+        return f"{percent:.2f}%"
+
+    def signup_bonus_miles_for_year(source):
+        bonus_miles = float(source.signup_bonus_miles or 0)
+        min_spend = float(source.signup_bonus_min_spend or 0)
+        if bonus_miles <= 0 or min_spend <= 0:
+            return 0, None
+
+        awarded_on = source.signup_bonus_awarded_on
+        bonus_transactions = list(
+            Transaction.objects.filter(source=source)
+            .exclude(Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income'))
+            .exclude(Q(category__name__icontains='rent') | Q(category__reporting_category__name__icontains='rent'))
+            .order_by('date', 'id')
+            .values_list('date', 'amount')
+        )
+        if awarded_on:
+            total_spend = 0
+            for txn_date, txn_amount in bonus_transactions:
+                if txn_date > awarded_on:
+                    break
+                total_spend += abs(float(txn_amount))
+            if total_spend < min_spend:
+                awarded_on = None
+                source.signup_bonus_awarded_on = None
+                source.save(update_fields=['signup_bonus_awarded_on'])
+        if not awarded_on:
+            total_spend = 0
+            for txn_date, txn_amount in bonus_transactions:
+                total_spend += abs(float(txn_amount))
+                if total_spend >= min_spend:
+                    awarded_on = txn_date
+                    source.signup_bonus_awarded_on = awarded_on
+                    source.save(update_fields=['signup_bonus_awarded_on'])
+                    break
+
+        if awarded_on and awarded_on.year == selected_year:
+            return bonus_miles, awarded_on
+        return 0, awarded_on
 
     for source in sources:
         reward_entries = RewardCategory.objects.filter(source=source).select_related('category', 'category__reporting_category')
         reward_rows = []
         total_rewards = 0
+        total_rewards_miles = 0
+        total_rewards_cash = 0
         total_spend = 0
         covered_spend = 0
 
@@ -1058,7 +1537,137 @@ def rewards_tracker(request):
         )
         total_source_spend = abs(float(base_transactions.aggregate(total=Sum('amount'))['total'] or 0))
 
+        if source.reward_type == 'card_cash_miles':
+            rent_filter = Q(category__name__icontains='rent') | Q(category__reporting_category__name__icontains='rent')
+            rent_transactions = base_transactions.filter(rent_filter)
+            non_rent_transactions = base_transactions.exclude(rent_filter)
+
+            rent_spend = abs(float(rent_transactions.aggregate(total=Sum('amount'))['total'] or 0))
+            non_rent_spend = abs(float(non_rent_transactions.aggregate(total=Sum('amount'))['total'] or 0))
+
+            non_rent_miles = non_rent_spend * 2.0
+            card_cash_earned = non_rent_spend * 0.04
+            card_cash_credit_total = Transaction.objects.filter(
+                source=source,
+                category__name__istartswith='card-cash-',
+                date__year=selected_year
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            card_cash_credits = abs(float(card_cash_credit_total))
+            card_cash_pool = card_cash_earned + card_cash_credits
+            redeemable_rent = min(rent_spend, card_cash_pool)
+            rent_miles = redeemable_rent / 0.03 if redeemable_rent else 0
+            miles_credit_total = Transaction.objects.filter(
+                source=source,
+                category__name__istartswith='miles-credit-',
+                date__year=selected_year
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            miles_credit_amount = abs(float(miles_credit_total))
+            credit_total = Transaction.objects.filter(
+                source=source,
+                category__name__istartswith='credit-',
+                date__year=selected_year
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            credit_amount = abs(float(credit_total))
+
+            if non_rent_spend > 0:
+                reward_rows.append({
+                    'category_name': 'Non-Rent Spend (Miles)',
+                    'reporting_category_name': None,
+                    'multiplier': 2.0,
+                    'multiplier_label': None,
+                    'spend': non_rent_spend,
+                    'rewards': non_rent_miles,
+                    'rewards_format': 'miles',
+                })
+                reward_rows.append({
+                    'category_name': 'Card Cash Earned',
+                    'reporting_category_name': None,
+                    'multiplier': 0.04,
+                    'multiplier_label': cashback_label(0.04),
+                    'spend': non_rent_spend,
+                    'rewards': card_cash_earned,
+                    'rewards_format': 'cash',
+                })
+
+            if card_cash_credits > 0:
+                reward_rows.append({
+                    'category_name': 'Card Cash Credits',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Credit',
+                    'spend': 0,
+                    'rewards': card_cash_credits,
+                    'rewards_format': 'cash',
+                })
+            if miles_credit_amount > 0:
+                reward_rows.append({
+                    'category_name': 'Miles Credits',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Credit',
+                    'spend': 0,
+                    'rewards': miles_credit_amount,
+                    'rewards_format': 'miles',
+                })
+
+            if rent_spend > 0:
+                reward_rows.append({
+                    'category_name': 'Rent (Redeemed Miles)',
+                    'reporting_category_name': None,
+                    'multiplier': 1 / 0.03,
+                    'multiplier_label': '$0.03 -> 1 mile',
+                    'spend': rent_spend,
+                    'rewards': rent_miles,
+                    'rewards_format': 'miles',
+                })
+
+            if credit_amount > 0:
+                reward_rows.append({
+                    'category_name': 'Credits',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Credit',
+                    'spend': 0,
+                    'rewards': credit_amount,
+                    'rewards_format': 'cash',
+                    'is_credit': True,
+                })
+
+            bonus_miles, _ = signup_bonus_miles_for_year(source)
+            if bonus_miles > 0:
+                reward_rows.append({
+                    'category_name': 'Signup Bonus',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Bonus',
+                    'spend': 0,
+                    'rewards': bonus_miles,
+                    'rewards_format': 'miles',
+                })
+
+            total_spend = non_rent_spend + rent_spend
+            total_rewards_miles = non_rent_miles + rent_miles + bonus_miles + miles_credit_amount
+            total_rewards_cash = credit_amount
+            total_rewards = total_rewards_miles + total_rewards_cash
+
+            sources_data.append({
+                'source': source,
+                'reward_rows': reward_rows,
+                'has_quarterly': False,
+                'total_spend': total_spend,
+                'total_rewards': total_rewards,
+                'total_rewards_miles': total_rewards_miles,
+                'total_rewards_cash': total_rewards_cash,
+            })
+            total_miles_earned += total_rewards_miles
+            total_credits_earned += total_rewards_cash
+            continue
+
         for entry in reward_entries:
+            if entry.applicable_quarter:
+                quarter_start, quarter_end = quarter_date_range(entry.applicable_quarter)
+                if not quarter_start or not quarter_end or quarter_start.year != selected_year:
+                    continue
             transaction_query = Transaction.objects.filter(
                 source=source,
                 category=entry.category
@@ -1066,13 +1675,10 @@ def rewards_tracker(request):
             if entry.applicable_quarter:
                 quarter_start, quarter_end = quarter_date_range(entry.applicable_quarter)
                 if quarter_start and quarter_end:
-                    if quarter_start.year != selected_year:
-                        transaction_query = transaction_query.none()
-                    else:
-                        transaction_query = transaction_query.filter(
-                            date__gte=quarter_start,
-                            date__lte=quarter_end
-                        )
+                    transaction_query = transaction_query.filter(
+                        date__gte=quarter_start,
+                        date__lte=quarter_end
+                    )
             else:
                 transaction_query = transaction_query.filter(date__year=selected_year)
             transaction_total = transaction_query.aggregate(total=Sum('amount'))['total'] or 0
@@ -1084,17 +1690,101 @@ def rewards_tracker(request):
                 'category_name': entry.category.name,
                 'reporting_category_name': entry.category.reporting_category.name if entry.category.reporting_category else None,
                 'multiplier': multiplier,
+                'multiplier_label': cashback_label(multiplier) if source.reward_type == 'cashback' else None,
+                'applicable_quarter': entry.applicable_quarter,
+                'quarter_label': f"Q{entry.applicable_quarter.split('Q', 1)[1]}" if entry.applicable_quarter and "Q" in entry.applicable_quarter else None,
                 'spend': spend,
                 'rewards': rewards,
+                'rewards_format': 'cash' if source.reward_type == 'cashback' else 'miles',
             })
             covered_spend += spend
             total_spend += spend
             total_rewards += rewards
+            if source.reward_type == 'miles':
+                total_rewards_miles += rewards
+            elif source.reward_type == 'cashback':
+                total_rewards_cash += rewards
+
+        if source.reward_type == 'miles':
+            bonus_miles, _ = signup_bonus_miles_for_year(source)
+            if bonus_miles > 0:
+                reward_rows.append({
+                    'category_name': 'Signup Bonus',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Bonus',
+                    'spend': 0,
+                    'rewards': bonus_miles,
+                    'rewards_format': 'miles',
+                    'is_bonus': True,
+                })
+                total_rewards += bonus_miles
+                total_rewards_miles += bonus_miles
+
+        if source.reward_type == 'miles':
+            miles_credit_total = Transaction.objects.filter(
+                source=source,
+                category__name__istartswith='miles-credit-',
+                date__year=selected_year
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            miles_credit_amount = abs(float(miles_credit_total))
+            if miles_credit_amount > 0:
+                reward_rows.append({
+                    'category_name': 'Miles Credits',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Credit',
+                    'spend': 0,
+                    'rewards': miles_credit_amount,
+                    'rewards_format': 'miles',
+                    'is_credit': True,
+                })
+                total_rewards += miles_credit_amount
+                total_rewards_miles += miles_credit_amount
+            credit_total = Transaction.objects.filter(
+                source=source,
+                category__name__istartswith='credit-',
+                date__year=selected_year
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            credit_amount = abs(float(credit_total))
+            if credit_amount > 0:
+                reward_rows.append({
+                    'category_name': 'Credits',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Credit',
+                    'spend': 0,
+                    'rewards': credit_amount,
+                    'rewards_format': 'cash',
+                    'is_credit': True,
+                })
+                total_rewards += credit_amount
+                total_rewards_cash += credit_amount
+        if source.reward_type == 'cashback':
+            credit_total = Transaction.objects.filter(
+                source=source,
+                category__name__istartswith='credit-',
+                date__year=selected_year
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            credit_amount = abs(float(credit_total))
+            if credit_amount > 0:
+                reward_rows.append({
+                    'category_name': 'Credits',
+                    'reporting_category_name': None,
+                    'multiplier': 0,
+                    'multiplier_label': 'Credit',
+                    'spend': 0,
+                    'rewards': credit_amount,
+                    'rewards_format': 'cash',
+                    'is_credit': True,
+                })
+                total_rewards += credit_amount
+                total_rewards_cash += credit_amount
 
         blanket_spend = max(total_source_spend - covered_spend, 0)
         blanket_multiplier = 0.01 if source.reward_type == 'cashback' else 1.0
         blanket_rewards = blanket_spend * blanket_multiplier
-        if blanket_spend > 0:
+        if blanket_spend > 0 and source.reward_type != 'none':
             reward_rows.append({
                 'category_name': 'All Other',
                 'reporting_category_name': None,
@@ -1102,23 +1792,41 @@ def rewards_tracker(request):
                 'multiplier_label': '1%' if source.reward_type == 'cashback' else '1.00x',
                 'spend': blanket_spend,
                 'rewards': blanket_rewards,
+                'rewards_format': 'cash' if source.reward_type == 'cashback' else 'miles',
                 'is_blanket': True,
             })
             total_spend += blanket_spend
             total_rewards += blanket_rewards
+            if source.reward_type == 'miles':
+                total_rewards_miles += blanket_rewards
+            elif source.reward_type == 'cashback':
+                total_rewards_cash += blanket_rewards
 
-        reward_rows.sort(key=lambda row: (row.get('is_blanket', False), row['category_name']))
+        reward_rows.sort(key=lambda row: (row.get('is_blanket', False), row.get('is_credit', False), row['category_name']))
         sources_data.append({
             'source': source,
             'reward_rows': reward_rows,
+            'has_quarterly': any(row.get('applicable_quarter') for row in reward_rows),
             'total_spend': total_spend,
             'total_rewards': total_rewards,
+            'total_rewards_miles': total_rewards_miles,
+            'total_rewards_cash': total_rewards_cash,
         })
+        if source.reward_type == 'miles':
+            total_miles_earned += total_rewards_miles
+            total_credits_earned += total_rewards_cash
+        elif source.reward_type == 'cashback':
+            total_cashback_earned += total_rewards_cash
 
     context = {
         'sources_data': sources_data,
         'years': years,
         'selected_year': selected_year,
+        'total_miles_earned': total_miles_earned,
+        'total_cashback_earned': total_cashback_earned,
+        'total_credits_earned': total_credits_earned,
+        'sources': Source.objects.order_by('name'),
+        'today': today,
     }
 
     return render(request, 'tracker/rewards.html', context)
@@ -1150,13 +1858,15 @@ def category_year_view(request):
         try:
             selected_category = Category.objects.get(id=category_id)
             monthly_data = (
-                Transaction.objects.filter(
-                    Q(category=selected_category) | Q(category__reporting_category=selected_category),
-                    date__year=year
+                annotate_net_amount(
+                    Transaction.objects.filter(
+                        Q(category=selected_category) | Q(category__reporting_category=selected_category),
+                        date__year=year
+                    )
                 )
                 .annotate(month=ExtractMonth("date"))
                 .values("month")
-                .annotate(total=Sum("amount"))
+                .annotate(total=Sum("net_amount"))
             )
             for entry in monthly_data:
                 month_idx = int(entry["month"]) - 1

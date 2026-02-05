@@ -12,9 +12,15 @@
                         <label for="editDescription" class="form-label">Description</label>
                         <input type="text" class="form-control" id="editDescription" name="description" required>
                     </div>
-                    <div class="mb-3">
-                        <label for="editAmount" class="form-label">Amount</label>
-                        <input type="text" class="form-control" id="editAmount" name="amount" required>
+                    <div class="row g-2 mb-3">
+                        <div class="col-sm-6">
+                            <label for="editAmount" class="form-label">Amount</label>
+                            <input type="text" class="form-control" id="editAmount" name="amount" required>
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="editReimbursement" class="form-label">Reimbursement</label>
+                            <input type="text" class="form-control" id="editReimbursement" name="reimbursement" placeholder="Optional">
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label for="editDate" class="form-label">Date</label>
@@ -48,7 +54,9 @@
 <script>
     document.querySelector('#editTransactionModal form').addEventListener('submit', function(e) {
       const amountInput = document.getElementById('editAmount');
+      const reimbursementInput = document.getElementById('editReimbursement');
       const originalValue = amountInput.value;
+      const reimbursementValue = reimbursementInput.value;
     
       try {
         // Only allow safe characters: numbers, + - * / . and spaces
@@ -68,6 +76,27 @@
       } catch (error) {
         e.preventDefault();
         alert("Please enter a valid math expression for the amount.");
+      }
+
+      if (!reimbursementValue) {
+        return;
+      }
+
+      try {
+        if (!/^[\d\s+\-*/.()]+$/.test(reimbursementValue)) {
+          throw new Error("Invalid characters in reimbursement.");
+        }
+
+        const evaluatedReimbursement = Function('"use strict"; return (' + reimbursementValue + ')')();
+
+        if (isNaN(evaluatedReimbursement) || !isFinite(evaluatedReimbursement)) {
+          throw new Error("Invalid math expression.");
+        }
+
+        reimbursementInput.value = parseFloat(evaluatedReimbursement).toFixed(2);
+      } catch (error) {
+        e.preventDefault();
+        alert("Please enter a valid math expression for the reimbursement.");
       }
     });
     </script>

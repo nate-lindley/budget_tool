@@ -32,7 +32,7 @@
                   <tr>
                     <td>{{ source.name }}</td>
                     <td>
-                      <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}" data-annual-fee="{{ source.annual_fee }}" data-reward-type="{{ source.reward_type }}">Edit</button>
+                      <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}" data-annual-fee="{{ source.annual_fee }}" data-reward-type="{{ source.reward_type }}" data-signup-bonus-miles="{{ source.signup_bonus_miles }}" data-signup-bonus-min-spend="{{ source.signup_bonus_min_spend }}">Edit</button>
                       <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_source' source.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
                     </td>
                   </tr>
@@ -110,6 +110,67 @@
     </div>
   </div>
 
+  <div class="row g-4 mt-2">
+    <div class="col-12">
+      <div class="card-panel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h4 class="mb-0">Recurring Transactions</h4>
+          <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addRecurringModal">Add Recurring</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Frequency</th>
+                <th>Next Date</th>
+                <th>Category</th>
+                <th>Source</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if recurring_transactions %}
+                {% for item in recurring_transactions %}
+                  <tr>
+                    <td>{{ item.recurring.description }}</td>
+                    <td>${{ item.recurring.amount|floatformat:2 }}</td>
+                    <td>{{ item.recurring.get_frequency_display_with_interval }}</td>
+                    <td>{{ item.next_date|default:"—" }}</td>
+                    <td>{{ item.recurring.category.name|default:"—" }}</td>
+                    <td>{{ item.recurring.source.name|default:"—" }}</td>
+                    <td>
+                      <button class="btn btn-sm btn-warning edit-recurring-btn" data-bs-toggle="modal" data-bs-target="#editRecurringModal"
+                        data-id="{{ item.recurring.id }}"
+                        data-description="{{ item.recurring.description }}"
+                        data-amount="{{ item.recurring.amount }}"
+                        data-frequency="{{ item.recurring.frequency }}"
+                        data-interval="{{ item.recurring.interval }}"
+                        data-day-of-month="{{ item.recurring.day_of_month }}"
+                        data-day-of-week="{{ item.recurring.day_of_week|default_if_none:'' }}"
+                        data-start-date="{{ item.recurring.start_date|date:'Y-m-d' }}"
+                        data-end-date="{{ item.recurring.end_date|date:'Y-m-d' }}"
+                        data-category="{{ item.recurring.category_id|default_if_none:'' }}"
+                        data-source="{{ item.recurring.source_id|default_if_none:'' }}">
+                        Edit
+                      </button>
+                      <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_recurring' item.recurring.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
+                    </td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="7" class="text-center text-muted">No recurring transactions set up.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <form method="post" enctype="multipart/form-data" action="{% url 'import_csv_preview' %}" class="import-actions">
     {% csrf_token %}
     <input type="file" name="csv_file" accept=".csv" required>
@@ -120,6 +181,8 @@
   {% include './modals/edit_source.html' %}
   {% include './modals/add_category.html' %}
   {% include './modals/edit_category.html' %}
+  {% include './modals/add_recurring.html' %}
+  {% include './modals/edit_recurring.html' %}
   {% include './modals/confirm_delete.html' %}
 {% endblock %}
 
@@ -133,6 +196,8 @@
       const nameInput = document.getElementById('editSourceName')
       const annualFeeInput = document.getElementById('editSourceAnnualFee')
       const rewardTypeInput = document.getElementById('editSourceRewardType')
+      const signupBonusMilesInput = document.getElementById('editSourceSignupBonusMiles')
+      const signupBonusMinSpendInput = document.getElementById('editSourceSignupBonusMinSpend')
       const rewardMapElement = document.getElementById('sourceRewardMap')
       const rewardMap = rewardMapElement ? JSON.parse(rewardMapElement.textContent) : {}
       const categoriesElement = document.getElementById('categoriesData')
@@ -200,6 +265,8 @@
           const sourceName = button.getAttribute('data-name')
           const sourceAnnualFee = button.getAttribute('data-annual-fee')
           const sourceRewardType = button.getAttribute('data-reward-type')
+          const sourceSignupBonusMiles = button.getAttribute('data-signup-bonus-miles')
+          const sourceSignupBonusMinSpend = button.getAttribute('data-signup-bonus-min-spend')
           const sourceRewardMap = rewardMap[sourceId] || {}
           nameInput.value = sourceName
           if (annualFeeInput) {
@@ -207,6 +274,12 @@
           }
           if (rewardTypeInput) {
             rewardTypeInput.value = sourceRewardType
+          }
+          if (signupBonusMilesInput) {
+            signupBonusMilesInput.value = sourceSignupBonusMiles
+          }
+          if (signupBonusMinSpendInput) {
+            signupBonusMinSpendInput.value = sourceSignupBonusMinSpend
           }
           if (rewardCategoryList) {
             rewardCategoryList.innerHTML = ''
@@ -280,6 +353,41 @@
         button.addEventListener('click', () => {
           const url = button.getAttribute('data-url');
           deleteForm.action = url;
+        });
+      });
+    });
+  </script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const editRecurringButtons = document.querySelectorAll('.edit-recurring-btn');
+      const editRecurringForm = document.getElementById('editRecurringForm');
+      const editRecurringFrequency = document.getElementById('editRecurringFrequency');
+      const editRecurringDayOfMonthGroup = document.getElementById('editRecurringDayOfMonthGroup');
+      const editRecurringDayOfWeekGroup = document.getElementById('editRecurringDayOfWeekGroup');
+
+      editRecurringButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const id = button.getAttribute('data-id');
+          editRecurringForm.action = `{% url 'edit_recurring' 0 %}`.replace(/0/, id);
+          document.getElementById('editRecurringDescription').value = button.getAttribute('data-description');
+          document.getElementById('editRecurringAmount').value = button.getAttribute('data-amount');
+          editRecurringFrequency.value = button.getAttribute('data-frequency');
+          document.getElementById('editRecurringInterval').value = button.getAttribute('data-interval');
+          document.getElementById('editRecurringDayOfMonth').value = button.getAttribute('data-day-of-month');
+          document.getElementById('editRecurringDayOfWeek').value = button.getAttribute('data-day-of-week') || '0';
+          document.getElementById('editRecurringStartDate').value = button.getAttribute('data-start-date');
+          document.getElementById('editRecurringEndDate').value = button.getAttribute('data-end-date') || '';
+          document.getElementById('editRecurringCategory').value = button.getAttribute('data-category') || '';
+          document.getElementById('editRecurringSource').value = button.getAttribute('data-source') || '';
+
+          // Toggle day fields based on frequency
+          if (editRecurringFrequency.value === 'weekly') {
+            editRecurringDayOfMonthGroup.style.display = 'none';
+            editRecurringDayOfWeekGroup.style.display = '';
+          } else {
+            editRecurringDayOfMonthGroup.style.display = '';
+            editRecurringDayOfWeekGroup.style.display = 'none';
+          }
         });
       });
     });

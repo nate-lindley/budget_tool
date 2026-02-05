@@ -24,7 +24,16 @@
                 <option value="cashback">Cashback</option>
                 <option value="points">Points</option>
                 <option value="miles">Miles</option>
+                <option value="card_cash_miles">Card Cash + Miles</option>
               </select>
+            </div>
+            <div class="mb-3">
+              <label for="editSourceSignupBonusMiles" class="form-label">Signup Bonus (Miles)</label>
+              <input type="number" name="signup_bonus_miles" id="editSourceSignupBonusMiles" class="form-control" step="1" min="0">
+            </div>
+            <div class="mb-3">
+              <label for="editSourceSignupBonusMinSpend" class="form-label">Signup Bonus Min Spend (Non-Rent)</label>
+              <input type="number" name="signup_bonus_min_spend" id="editSourceSignupBonusMinSpend" class="form-control" step="0.01" min="0">
             </div>
             <div class="mb-3">
               <label class="form-label">Reward Categories</label>

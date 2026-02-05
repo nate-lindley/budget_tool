@@ -1,0 +1,94 @@
+<div class="modal fade" id="addRewardCreditModal" tabindex="-1" aria-labelledby="addRewardCreditLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{% url 'add_reward_credit' %}">
+        {% csrf_token %}
+        <div class="modal-header">
+          <h5 class="modal-title" id="addRewardCreditLabel">Add Reward Credit</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="rewardSource" class="form-label">Source</label>
+            <select class="form-select" id="rewardSource" name="source" required>
+              <option value="" disabled selected>Select a source</option>
+              {% for source in sources %}
+                <option value="{{ source.id }}">{{ source.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="creditType" class="form-label">Credit Type</label>
+            <select class="form-select" id="creditType" name="credit_type">
+              <option value="reward">Reward credit (counts as credit)</option>
+              <option value="card_cash">Card cash credit (rent redemption only)</option>
+              <option value="miles">Miles credit</option>
+            </select>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-sm-6">
+              <label for="rewardReason" class="form-label">Reason</label>
+              <select class="form-select" id="rewardReason" name="reward_reason">
+                <option value="signup">Sign-up bonus</option>
+                <option value="anniversary">Anniversary bonus</option>
+                <option value="manual">Other</option>
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label for="rewardAmount" class="form-label">Amount</label>
+              <input type="text" class="form-control" id="rewardAmount" name="amount" required>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="rewardDate" class="form-label">Date</label>
+            <input type="date" class="form-control" id="rewardDate" name="date" value="{{ today }}" required>
+          </div>
+          <div class="mb-3">
+            <label for="rewardDescription" class="form-label">Description</label>
+            <input type="text" class="form-control" id="rewardDescription" name="description" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Credit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const reasonSelect = document.getElementById('rewardReason');
+    const descriptionInput = document.getElementById('rewardDescription');
+    const creditTypeSelect = document.getElementById('creditType');
+    const defaultDescriptions = {
+      signup: 'Signup bonus credit',
+      anniversary: 'Anniversary bonus credit',
+      manual: 'Reward credit'
+    };
+
+    if (!reasonSelect || !descriptionInput || !creditTypeSelect) {
+      return;
+    }
+
+    const syncDescription = () => {
+      if (descriptionInput.value.trim()) {
+        return;
+      }
+      if (creditTypeSelect.value === 'card_cash') {
+        descriptionInput.value = 'Card cash credit';
+        return;
+      }
+      if (creditTypeSelect.value === 'miles') {
+        descriptionInput.value = 'Miles credit';
+        return;
+      }
+      const reason = reasonSelect.value;
+      descriptionInput.value = defaultDescriptions[reason] || 'Reward credit';
+    };
+
+    reasonSelect.addEventListener('change', syncDescription);
+    creditTypeSelect.addEventListener('change', syncDescription);
+    syncDescription();
+  });
+</script>

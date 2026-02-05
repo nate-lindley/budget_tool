@@ -10,13 +10,33 @@
     <p class="muted-note">Track earned rewards by source and keep them aligned with reporting categories.</p>
   </div>
 
-  <form method="get" class="filters">
-    <select name="year" onchange="this.form.submit()">
-      {% for year in years %}
-        <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
-      {% endfor %}
-    </select>
-  </form>
+  <div class="card-panel mb-4">
+    <div class="d-flex flex-wrap gap-4">
+      <div>
+        <div class="text-subtle small">Total Miles Earned</div>
+        <div class="fs-4 fw-semibold">{{ total_miles_earned|floatformat:0|intcomma }}</div>
+      </div>
+      <div>
+        <div class="text-subtle small">Total Cashback Earned</div>
+        <div class="fs-4 fw-semibold">{{ total_cashback_earned|dollar_format }}</div>
+      </div>
+      <div>
+        <div class="text-subtle small">Total Credits Earned</div>
+        <div class="fs-4 fw-semibold">{{ total_credits_earned|dollar_format }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+    <form method="get" class="filters mb-0">
+      <select name="year" onchange="this.form.submit()">
+        {% for year in years %}
+          <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addRewardCreditModal">Add Credit</button>
+  </div>
 
   {% if sources_data %}
     {% for entry in sources_data %}
@@ -36,10 +56,23 @@
             <div class="fs-5 fw-semibold">
               {% if entry.source.reward_type == "cashback" %}
                 {{ entry.total_rewards|dollar_format }}
+              {% elif entry.source.reward_type == "card_cash_miles" %}
+                {{ entry.total_rewards_miles|floatformat:0|intcomma }}
+              {% elif entry.source.reward_type == "miles" %}
+                {{ entry.total_rewards_miles|floatformat:0|intcomma }}
               {% else %}
                 {{ entry.total_rewards|floatformat:0|intcomma }}
               {% endif %}
             </div>
+            {% if entry.source.reward_type == "miles" %}
+              <div class="text-subtle small">
+                Credits: {{ entry.total_rewards_cash|dollar_format }}
+              </div>
+            {% elif entry.source.reward_type == "card_cash_miles" %}
+              <div class="text-subtle small">
+                Credits: {{ entry.total_rewards_cash|dollar_format }}
+              </div>
+            {% endif %}
           </div>
         </div>
 
@@ -50,6 +83,9 @@
                 <tr>
                   <th>Reward Category</th>
                   <th>Reporting Category</th>
+                  {% if entry.has_quarterly %}
+                    <th>Quarter</th>
+                  {% endif %}
                   <th>Multiplier</th>
                   <th>Spend</th>
                   <th>Rewards</th>
@@ -60,6 +96,9 @@
                   <tr>
                     <td>{{ row.category_name }}</td>
                     <td>{{ row.reporting_category_name|default:"-" }}</td>
+                    {% if entry.has_quarterly %}
+                      <td>{{ row.quarter_label|default:"-" }}</td>
+                    {% endif %}
                     <td>
                       {% if row.multiplier_label %}
                         {{ row.multiplier_label }}
@@ -69,7 +108,7 @@
                     </td>
                     <td>{{ row.spend|dollar_format }}</td>
                     <td>
-                      {% if entry.source.reward_type == "cashback" %}
+                      {% if row.rewards_format == "cash" %}
                         {{ row.rewards|dollar_format }}
                       {% else %}
                         {{ row.rewards|floatformat:0|intcomma }}
@@ -88,4 +127,6 @@
   {% else %}
     <p class="text-subtle center-text">Add a source and reward categories in Settings to see rewards here.</p>
   {% endif %}
+
+  {% include './modals/add_reward_credit.html' %}
 {% endblock %}
