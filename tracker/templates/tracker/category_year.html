@@ -2,15 +2,18 @@
 {% load static %}
 {% load humanize %}
 
-{% block title %}Category by Year{% endblock %}
+{% block title %}Category by {% if view_mode == 'ttm' %}Trailing 12 Months{% else %}Year{% endif %}{% endblock %}
 
 {% block content %}
   <div class="section-header">
     <h2>Category Spend by Month</h2>
-    <p class="muted-note">Select a category to see how it trends through the year.</p>
+    <p class="muted-note">Select a category to see how it trends {% if view_mode == 'ttm' %}over the trailing 12 months{% else %}through the year{% endif %}.</p>
   </div>
 
   <form method="get" class="filters">
+    {% if view_mode == 'ttm' %}
+      <input type="hidden" name="view" value="ttm">
+    {% endif %}
     <select name="category" onchange="this.form.submit()">
       {% for category in categories %}
         <option value="{{ category.id }}" {% if category.id == selected_category_id %}selected{% endif %}>
@@ -18,18 +21,20 @@
         </option>
       {% endfor %}
     </select>
-    <select name="year" onchange="this.form.submit()">
-      {% for y in years %}
-        <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
-      {% endfor %}
-    </select>
+    {% if view_mode != 'ttm' %}
+      <select name="year" onchange="this.form.submit()">
+        {% for y in years %}
+          <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
   </form>
 
   <div class="chart-card">
     {% if selected_category %}
       <canvas id="categoryChart"></canvas>
       <div class="center-text fw-semibold mt-3">
-        {{ selected_category.name }} total for {{ year }}:
+        {{ selected_category.name }} total for {% if view_mode == 'ttm' %}trailing 12 months{% else %}{{ year }}{% endif %}:
         ${{ total_for_year|floatformat:2|intcomma }}
         &nbsp;•&nbsp;
         Monthly average: ${{ average_per_month|floatformat:2|intcomma }}
@@ -47,6 +52,9 @@
     const monthlyTotals = {{ monthly_totals|safe }};
     const selectedYear = {{ year }};
     const selectedCategoryId = {{ selected_category_id|default:"null" }};
+    const viewMode = '{{ view_mode }}';
+    const ttmMonths = {% if ttm_months %}{{ ttm_months|safe }}{% else %}null{% endif %};
+    const monthlyBudget = {{ monthly_budget }};
 
     {% if selected_category %}
     const categoryCtx = document.getElementById('categoryChart');
@@ -74,12 +82,26 @@
       type: 'bar',
       data: {
         labels: monthLabels,
-        datasets: [{
-          label: '{{ selected_category.name|escapejs }}',
-          data: monthlyTotals,
-          backgroundColor: monthLabels.map((_, idx) => `hsl(${idx * 30}, 70%, 60%)`),
-          borderRadius: 6,
-        }]
+        datasets: [
+          {
+            label: '{{ selected_category.name|escapejs }}',
+            data: monthlyTotals,
+            backgroundColor: monthLabels.map((_, idx) => `hsl(${idx * 30}, 70%, 60%)`),
+            borderRadius: 6,
+          },
+          ...(monthlyBudget > 0 ? [{
+            label: 'Budget',
+            data: monthLabels.map(() => monthlyBudget),
+            type: 'line',
+            borderColor: '#888',
+            borderDash: [6, 4],
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            fill: false,
+            order: 0,
+          }] : [])
+        ]
       },
       options: {
         maintainAspectRatio: false,
@@ -96,7 +118,7 @@
               label: (ctx) => `$${Number(ctx.raw || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
             }
           },
-          legend: { display: false }
+          legend: { display: monthlyBudget > 0 }
         },
         animation: {
           duration: 900,
@@ -120,10 +142,17 @@
         onClick: (evt, elements) => {
           if (!elements.length || selectedCategoryId === null) return;
           const barIndex = elements[0].index;
-          const month = barIndex + 1;
-          const start = `${selectedYear}-${String(month).padStart(2, '0')}-01`;
-          const lastDay = new Date(selectedYear, month, 0).getDate();
-          const end = `${selectedYear}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+          let barYear, barMonth;
+          if (viewMode === 'ttm' && ttmMonths) {
+            barYear = ttmMonths[barIndex][0];
+            barMonth = ttmMonths[barIndex][1];
+          } else {
+            barYear = selectedYear;
+            barMonth = barIndex + 1;
+          }
+          const start = `${barYear}-${String(barMonth).padStart(2, '0')}-01`;
+          const lastDay = new Date(barYear, barMonth, 0).getDate();
+          const end = `${barYear}-${String(barMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
           const url = `/?category=${selectedCategoryId}&start_date=${start}&end_date=${end}`;
           window.location.href = url;
         }

@@ -40,7 +40,7 @@
       </thead>
       <tbody>
         {% for entry in ytd_data %}
-          <tr {% if entry.category__id %}class="clickable-row" data-href="/category_year/?category={{ entry.category__id }}&year={{ year }}"{% endif %}>
+          <tr {% if entry.category__id %}class="clickable-row" data-href="/category_year/?category={{ entry.category__id }}&year={{ year }}&view={{ view_mode }}"{% endif %}>
             <td>{{ entry.category__name }}</td>
             <td>{{ entry.total|dollar_format }}</td>
             <td>{{ entry.annual_budget|dollar_format }}</td>
@@ -67,7 +67,7 @@
             {{ total_data.total_surplus|dollar_format }}
           </td>
         </tr>
-        <tr class="clickable-row" data-href="/category_year/?category={{ income_data.category__id }}&year={{ year }}">
+        <tr class="clickable-row" data-href="/category_year/?category={{ income_data.category__id }}&year={{ year }}&view={{ view_mode }}">
           <td>{{ income_data.category__name }}</td>
           <td>{{ income_data.total|dollar_format }}</td>
           <td>{{ income_data.annual_budget|dollar_format }}</td>
@@ -215,7 +215,7 @@
           const idx = elements[0].index;
           const slice = categoryPieData[idx];
           if (!slice.category_id) return;
-          window.location.href = `/category_year/?category=${slice.category_id}&year={{ year }}`;
+          window.location.href = `/category_year/?category=${slice.category_id}&year={{ year }}&view={{ view_mode }}`;
         }
       }
     });

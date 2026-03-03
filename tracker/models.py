@@ -111,6 +111,14 @@ class Transaction(models.Model):
         """
         ordering = ['-date']
 
+class DismissedSuggestion(models.Model):
+    description = models.CharField(max_length=200, unique=True)
+    dismissed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-dismissed_at']
+
+
 class Month(models.Model):
     """
     Model representing a month for budget tracking.

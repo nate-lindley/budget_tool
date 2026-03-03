@@ -25,4 +25,5 @@ urlpatterns = [
     path("edit_recurring/<int:recurring_id>/", views.edit_recurring_transaction, name="edit_recurring"),
     path("delete_recurring/<int:recurring_id>/", views.delete_recurring_transaction, name="delete_recurring"),
     path("add_from_recurring/<int:recurring_id>/", views.add_from_recurring, name="add_from_recurring"),
+    path("dismiss_suggestion/", views.dismiss_recurring_suggestion, name="dismiss_suggestion"),
 ]

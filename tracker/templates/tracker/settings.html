@@ -171,6 +171,75 @@
     </div>
   </div>
 
+  {% if recurring_suggestions %}
+  <div class="row g-4 mt-2">
+    <div class="col-12">
+      <div class="card-panel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h4 class="mb-0">Suggested Recurring Transactions</h4>
+        </div>
+        <p class="muted-note">These transactions appear to repeat on a regular schedule. Confirm to add as recurring, or dismiss to hide.</p>
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Avg Amount</th>
+                <th>Pattern</th>
+                <th>Occurrences</th>
+                <th>Confidence</th>
+                <th>Category</th>
+                <th>Source</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in recurring_suggestions %}
+                <tr>
+                  <td>{{ s.description }}</td>
+                  <td>${{ s.amount }}</td>
+                  <td>
+                    {% if s.frequency == 'weekly' %}
+                      Every {% if s.interval > 1 %}{{ s.interval }} {% endif %}week{{ s.interval|pluralize }}
+                    {% elif s.frequency == 'monthly' %}
+                      Every {% if s.interval > 1 %}{{ s.interval }} {% endif %}month{{ s.interval|pluralize }}
+                    {% elif s.frequency == 'yearly' %}
+                      Yearly
+                    {% endif %}
+                  </td>
+                  <td>{{ s.occurrences }}</td>
+                  <td>{% widthratio s.consistency_score 1 100 %}%</td>
+                  <td>{{ s.category_name|default:"—" }}</td>
+                  <td>{{ s.source_name|default:"—" }}</td>
+                  <td>
+                    <button class="btn btn-sm btn-success confirm-suggestion-btn"
+                      data-description="{{ s.description }}"
+                      data-amount="{{ s.amount }}"
+                      data-frequency="{{ s.frequency }}"
+                      data-interval="{{ s.interval }}"
+                      data-day-of-month="{{ s.day_of_month }}"
+                      data-day-of-week="{{ s.day_of_week|default_if_none:'' }}"
+                      data-start-date="{{ s.start_date }}"
+                      data-category="{{ s.category_id|default_if_none:'' }}"
+                      data-source="{{ s.source_id|default_if_none:'' }}">
+                      Confirm
+                    </button>
+                    <form method="post" action="{% url 'dismiss_suggestion' %}" style="display:inline;">
+                      {% csrf_token %}
+                      <input type="hidden" name="description" value="{{ s.description }}">
+                      <button type="submit" class="btn btn-sm btn-outline-secondary">Dismiss</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <form method="post" enctype="multipart/form-data" action="{% url 'import_csv_preview' %}" class="import-actions">
     {% csrf_token %}
     <input type="file" name="csv_file" accept=".csv" required>
@@ -388,6 +457,51 @@
             editRecurringDayOfMonthGroup.style.display = '';
             editRecurringDayOfWeekGroup.style.display = 'none';
           }
+        });
+      });
+    });
+  </script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const confirmButtons = document.querySelectorAll('.confirm-suggestion-btn');
+      confirmButtons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          document.getElementById('addRecurringDescription').value = btn.getAttribute('data-description');
+          document.getElementById('addRecurringAmount').value = btn.getAttribute('data-amount');
+          document.getElementById('addRecurringFrequency').value = btn.getAttribute('data-frequency');
+          document.getElementById('addRecurringInterval').value = btn.getAttribute('data-interval');
+          document.getElementById('addRecurringDayOfMonth').value = btn.getAttribute('data-day-of-month');
+          document.getElementById('addRecurringStartDate').value = btn.getAttribute('data-start-date');
+
+          var dayOfWeek = btn.getAttribute('data-day-of-week');
+          if (dayOfWeek !== '') {
+            document.getElementById('addRecurringDayOfWeek').value = dayOfWeek;
+          }
+
+          var category = btn.getAttribute('data-category');
+          if (category) {
+            document.getElementById('addRecurringCategory').value = category;
+          }
+
+          var source = btn.getAttribute('data-source');
+          if (source) {
+            document.getElementById('addRecurringSource').value = source;
+          }
+
+          // Toggle day fields based on frequency
+          var freq = btn.getAttribute('data-frequency');
+          var dayOfMonthGroup = document.getElementById('addRecurringDayOfMonthGroup');
+          var dayOfWeekGroup = document.getElementById('addRecurringDayOfWeekGroup');
+          if (freq === 'weekly') {
+            dayOfMonthGroup.style.display = 'none';
+            dayOfWeekGroup.style.display = '';
+          } else {
+            dayOfMonthGroup.style.display = '';
+            dayOfWeekGroup.style.display = 'none';
+          }
+
+          var modal = new bootstrap.Modal(document.getElementById('addRecurringModal'));
+          modal.show();
         });
       });
     });

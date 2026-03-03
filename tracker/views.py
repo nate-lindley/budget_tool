@@ -8,6 +8,13 @@ import csv
 from io import TextIOWrapper
 from django.core.paginator import Paginator
 import time
+from .recurring_detector import detect_recurring_patterns
+
+CREDIT_CATEGORY_Q = (
+    Q(category__name__istartswith='card-cash-') |
+    Q(category__name__istartswith='miles-credit-') |
+    Q(category__name__istartswith='credit-')
+)
 
 
 def annotate_reporting_category(queryset):
@@ -225,10 +232,12 @@ def add_reward_credit(request):
         name=credit_category_name,
         defaults={"budget": 0},
     )
-    if credit_category.reporting_category_id is None:
+    # Credits should not be assigned to the income reporting category.
+    # If a credit category was previously assigned to income, clear it.
+    if credit_category.reporting_category_id is not None:
         income_category = Category.objects.filter(name__iexact="income").first()
-        if income_category:
-            credit_category.reporting_category = income_category
+        if income_category and credit_category.reporting_category_id == income_category.id:
+            credit_category.reporting_category = None
             credit_category.save(update_fields=["reporting_category"])
 
     Transaction.objects.create(
@@ -598,6 +607,14 @@ def add_source(request):
     # Redirect to the referring URL
     return HttpResponseRedirect(referring_url)
 
+def dismiss_recurring_suggestion(request):
+    if request.method == "POST":
+        description = request.POST.get('description', '').strip()
+        if description:
+            DismissedSuggestion.objects.get_or_create(description=description)
+    return HttpResponseRedirect("/settings/")
+
+
 def settings_page(request):
     """
     View function for the settings page.
@@ -674,6 +691,8 @@ def settings_page(request):
             'next_date': next_date,
         })
 
+    recurring_suggestions = detect_recurring_patterns()
+
     context = {
         'categories': categories,
         'reporting_categories': reporting_categories,
@@ -684,6 +703,7 @@ def settings_page(request):
         'quarters': quarters,
         'categories_data': categories_data,
         'recurring_transactions': recurring_with_next,
+        'recurring_suggestions': recurring_suggestions,
     }
     return render(request, "tracker/settings.html", context)
 
@@ -933,12 +953,12 @@ def reports_view(request):
     )
     transactions = base_transactions.exclude(category__name__iexact='income').exclude(
         category__reporting_category__name__iexact='income'
-    )
+    ).exclude(CREDIT_CATEGORY_Q)
 
     if income_total_amount is None:
         income_total = base_transactions.filter(
             Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income')
-        ).aggregate(total=Sum('net_amount'))
+        ).exclude(CREDIT_CATEGORY_Q).aggregate(total=Sum('net_amount'))
 
         income_total_amount = float(income_total['total']) if income_total['total'] else 0
     
@@ -1243,7 +1263,7 @@ def ytd_report(request):
         annotate_reporting_category(
             transactions.exclude(category__name__iexact='income').exclude(
                 category__reporting_category__name__iexact='income'
-            )
+            ).exclude(CREDIT_CATEGORY_Q)
         )
         .values('reporting_category_id', 'reporting_category_name', 'reporting_category_budget')
         .annotate(total=Sum('net_amount') * -1)
@@ -1253,7 +1273,7 @@ def ytd_report(request):
         annotate_reporting_category(
             transactions.filter(
                 Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income')
-            )
+            ).exclude(CREDIT_CATEGORY_Q)
         )
         .values('reporting_category_id', 'reporting_category_name', 'reporting_category_budget')
         .annotate(total=Sum('net_amount'))
@@ -1338,11 +1358,11 @@ def ytd_report(request):
             date__year=chart_year,
             date__month=chart_month,
             category__name__iexact='income'
-        ).aggregate(total=Sum('net_amount'))['total'] or 0 
+        ).exclude(CREDIT_CATEGORY_Q).aggregate(total=Sum('net_amount'))['total'] or 0
 
         spend = transactions.exclude(
             category__name__iexact='income'
-        ).filter(
+        ).exclude(CREDIT_CATEGORY_Q).filter(
             date__year=chart_year,
             date__month=chart_month
         ).aggregate(total=Sum('net_amount'))['total'] or 0
@@ -1392,7 +1412,7 @@ def mtd_report(request):
         annotate_reporting_category(
             transactions.exclude(category__name__iexact='income').exclude(
                 category__reporting_category__name__iexact='income'
-            )
+            ).exclude(CREDIT_CATEGORY_Q)
         )
         .values('reporting_category_name', 'reporting_category_budget')
         .annotate(total=Sum('net_amount') * -1)
@@ -1418,11 +1438,11 @@ def mtd_report(request):
         income = transactions.filter(
             date__day=day,
             category__name__iexact='income'
-        ).aggregate(total=Sum('net_amount'))['total'] or 0
+        ).exclude(CREDIT_CATEGORY_Q).aggregate(total=Sum('net_amount'))['total'] or 0
 
         spend = transactions.exclude(
             category__name__iexact='income'
-        ).filter(date__day=day).aggregate(total=Sum('net_amount'))['total'] or 0
+        ).exclude(CREDIT_CATEGORY_Q).filter(date__day=day).aggregate(total=Sum('net_amount'))['total'] or 0
 
         savings_chart_data.append({
             'day': day,
@@ -1495,6 +1515,7 @@ def rewards_tracker(request):
         bonus_transactions = list(
             Transaction.objects.filter(source=source)
             .exclude(Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income'))
+            .exclude(CREDIT_CATEGORY_Q)
             .exclude(Q(category__name__icontains='rent') | Q(category__reporting_category__name__icontains='rent'))
             .order_by('date', 'id')
             .values_list('date', 'amount')
@@ -1534,7 +1555,7 @@ def rewards_tracker(request):
 
         base_transactions = Transaction.objects.filter(source=source, date__year=selected_year).exclude(
             Q(category__name__iexact='income') | Q(category__reporting_category__name__iexact='income')
-        )
+        ).exclude(CREDIT_CATEGORY_Q)
         total_source_spend = abs(float(base_transactions.aggregate(total=Sum('amount'))['total'] or 0))
 
         if source.reward_type == 'card_cash_miles':
@@ -1834,10 +1855,19 @@ def rewards_tracker(request):
 
 def category_year_view(request):
     """
-    Display a bar chart of a single category's monthly totals for the selected year.
+    Display a bar chart of a single category's monthly totals for the selected year
+    or trailing 12 months.
     """
     categories = Category.objects.filter(reporting_category__isnull=True).order_by('name')
-    current_year = datetime.now().year
+    now = datetime.now()
+    current_year = now.year
+
+    view_mode = request.GET.get("view", "ytd")
+    if view_mode not in {"ytd", "ttm"}:
+        view_mode = "ytd"
+
+    is_ttm = view_mode == "ttm"
+
     year_values = (
         Transaction.objects.annotate(year=ExtractYear("date"))
         .values_list("year", flat=True)
@@ -1851,28 +1881,61 @@ def category_year_view(request):
     default_category = categories.exclude(name__iexact="income").first() or categories.first()
     category_id = request.GET.get("category") or (default_category.id if default_category else None)
 
+    if is_ttm:
+        # Build list of (year, month) tuples for trailing 12 months
+        def shift_month(y, m, delta):
+            total = (y * 12) + (m - 1) + delta
+            return total // 12, (total % 12) + 1
+
+        ttm_months = [shift_month(current_year, now.month, -offset) for offset in range(11, -1, -1)]
+        start_year, start_month = ttm_months[0]
+        start_date = datetime(start_year, start_month, 1).date()
+        end_date = now.date()
+        month_labels = [f"{calendar.month_abbr[m]} '{str(y)[-2:]}" for y, m in ttm_months]
+    else:
+        ttm_months = None
+        month_labels = [calendar.month_abbr[i] for i in range(1, 13)]
+
     monthly_totals = [0 for _ in range(12)]
     selected_category = None
 
     if category_id:
         try:
             selected_category = Category.objects.get(id=category_id)
-            monthly_data = (
-                annotate_net_amount(
-                    Transaction.objects.filter(
-                        Q(category=selected_category) | Q(category__reporting_category=selected_category),
-                        date__year=year
-                    )
+            base_filter = Q(category=selected_category) | Q(category__reporting_category=selected_category)
+
+            if is_ttm:
+                txns = annotate_net_amount(
+                    Transaction.objects.filter(base_filter, date__gte=start_date, date__lte=end_date)
                 )
-                .annotate(month=ExtractMonth("date"))
-                .values("month")
-                .annotate(total=Sum("net_amount"))
-            )
-            for entry in monthly_data:
-                month_idx = int(entry["month"]) - 1
-                monthly_totals[month_idx] = abs(float(entry["total"])) if entry["total"] else 0
+                monthly_data = (
+                    txns.annotate(m=ExtractMonth("date"), y=ExtractYear("date"))
+                    .values("y", "m")
+                    .annotate(total=Sum("net_amount"))
+                )
+                # Map each (year, month) to its TTM index
+                ttm_index = {(y, m): idx for idx, (y, m) in enumerate(ttm_months)}
+                for entry in monthly_data:
+                    key = (int(entry["y"]), int(entry["m"]))
+                    idx = ttm_index.get(key)
+                    if idx is not None:
+                        monthly_totals[idx] = abs(float(entry["total"])) if entry["total"] else 0
+            else:
+                monthly_data = (
+                    annotate_net_amount(
+                        Transaction.objects.filter(base_filter, date__year=year)
+                    )
+                    .annotate(month=ExtractMonth("date"))
+                    .values("month")
+                    .annotate(total=Sum("net_amount"))
+                )
+                for entry in monthly_data:
+                    month_idx = int(entry["month"]) - 1
+                    monthly_totals[month_idx] = abs(float(entry["total"])) if entry["total"] else 0
         except Category.DoesNotExist:
             selected_category = None
+
+    monthly_budget = float(selected_category.budget) if selected_category and selected_category.budget else 0
 
     context = {
         "categories": categories,
@@ -1880,10 +1943,14 @@ def category_year_view(request):
         "selected_category_id": int(category_id) if category_id else None,
         "year": year,
         "years": years,
-        "month_labels": [calendar.month_abbr[i] for i in range(1, 13)],
+        "view_mode": view_mode,
+        "month_labels": month_labels,
         "monthly_totals": monthly_totals,
+        "monthly_budget": monthly_budget,
         "total_for_year": sum(monthly_totals),
         "average_per_month": (sum(monthly_totals) / 12) if monthly_totals else 0,
+        # Pass TTM month data for bar click navigation
+        "ttm_months": [[y, m] for y, m in ttm_months] if is_ttm else None,
     }
 
     return render(request, "tracker/category_year.html", context)
