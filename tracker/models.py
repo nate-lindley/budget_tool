@@ -98,6 +98,8 @@ class Transaction(models.Model):
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, default=None, blank=True, null=True)
     source = models.ForeignKey(Source, on_delete=models.SET_NULL, default=None, blank=True, null=True)
     recurring_source = models.ForeignKey(RecurringTransaction, on_delete=models.SET_NULL, null=True, blank=True)
+    notes = models.TextField(blank=True, default='')
+    tags = models.CharField(max_length=500, blank=True, default='')
 
     def __str__(self):
         """

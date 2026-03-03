@@ -76,7 +76,11 @@ def index(request):
     ).order_by('-date')
 
     if search_query:
-        transactions_list = transactions_list.filter(description__icontains=search_query)
+        transactions_list = transactions_list.filter(
+            Q(description__icontains=search_query) |
+            Q(notes__icontains=search_query) |
+            Q(tags__icontains=search_query)
+        )
     if category_filter:
         transactions_list = transactions_list.filter(
             Q(category__reporting_category_id=category_filter) | Q(category__id=category_filter)
@@ -179,7 +183,9 @@ def add_transaction(request):
         reimbursement=reimbursement,
         date=request.POST['date'],
         category=category,
-        source=source
+        source=source,
+        tags=request.POST.get('tags', '').strip(),
+        notes=request.POST.get('notes', '').strip(),
     )
     new_transaction.save()
 
@@ -865,8 +871,12 @@ def edit_transaction(request, transaction_id):
             transaction.category_id = request.POST['category']
         if 'source' in request.POST:
             transaction.source_id = request.POST['source']
-        
-        transaction.save()  # Save the updated transaction to the database
+        if 'tags' in request.POST:
+            transaction.tags = request.POST['tags'].strip()
+        if 'notes' in request.POST:
+            transaction.notes = request.POST['notes'].strip()
+
+        transaction.save()
         referring_url = request.META.get('HTTP_REFERER', '/')
         return HttpResponseRedirect(referring_url)  # Redirect to the referring URL after saving
     

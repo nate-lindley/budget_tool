@@ -118,7 +118,11 @@
           <tbody>
             {% for transaction in transactions %}
               <tr>
-                <td>{{ transaction.description }}</td>
+                <td>
+                  {{ transaction.description }}
+                  {% if transaction.tags %}<br><small class="text-muted">{{ transaction.tags }}</small>{% endif %}
+                  {% if transaction.notes %}<br><small class="text-muted">{{ transaction.notes }}</small>{% endif %}
+                </td>
                 <td class="{% if transaction.net_amount < 0 %}text-negative{% else %}text-neutral{% endif %}">
                   {{ transaction.net_amount|dollar_format }}
                 </td>
@@ -133,7 +137,9 @@
                     data-reimbursement="{{ transaction.reimbursement|default_if_none:'' }}"
                     data-date="{{ transaction.date }}"
                     data-category="{{ transaction.category.id }}"
-                    data-source="{{ transaction.source.id }}">
+                    data-source="{{ transaction.source.id }}"
+                    data-tags="{{ transaction.tags }}"
+                    data-notes="{{ transaction.notes }}">
                     Edit
                   </button>
                   <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_transaction' transaction.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">
@@ -220,6 +226,8 @@
       const date = document.getElementById('editDate');
       const category = document.getElementById('editCategory');
       const source = document.getElementById('editSource');
+      const tags = document.getElementById('editTags');
+      const notes = document.getElementById('editNotes');
 
       editButtons.forEach((button) => {
         button.addEventListener('click', () => {
@@ -234,6 +242,8 @@
           date.value = formatted;
           category.value = button.getAttribute('data-category');
           source.value = button.getAttribute('data-source');
+          tags.value = button.getAttribute('data-tags') || '';
+          notes.value = button.getAttribute('data-notes') || '';
         });
       });
     });
