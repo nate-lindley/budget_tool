@@ -1,4 +1,5 @@
 from django.shortcuts import render, HttpResponseRedirect
+from django.contrib import messages
 from .models import *
 from datetime import datetime, timedelta, date
 from django.db.models import Sum, Q, Exists, OuterRef, Min, Max, F, Value, DecimalField, Case, When, BooleanField
@@ -68,11 +69,14 @@ def index(request):
     source_filter = request.GET.get('source')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
+    search_query = request.GET.get('search', '').strip()
 
     transactions_list = annotate_net_amount(
         Transaction.objects.all()
     ).order_by('-date')
 
+    if search_query:
+        transactions_list = transactions_list.filter(description__icontains=search_query)
     if category_filter:
         transactions_list = transactions_list.filter(
             Q(category__reporting_category_id=category_filter) | Q(category__id=category_filter)
@@ -104,6 +108,7 @@ def index(request):
         'selected_source': source_filter,
         'start_date': start_date,
         'end_date': end_date,
+        'search_query': search_query,
         'upcoming_transactions': upcoming_transactions,
     }
     return render(request, "tracker/index.html", context)
@@ -176,12 +181,21 @@ def add_transaction(request):
         category=category,
         source=source
     )
-    new_transaction.save()  # Save the new transaction to the database
+    new_transaction.save()
 
-    # Get the referring URL or use a default if it's not available
+    # Check for potential duplicates (same date + amount, excluding this transaction)
+    duplicates = Transaction.objects.filter(
+        date=new_transaction.date,
+        amount=new_transaction.amount,
+    ).exclude(id=new_transaction.id)
+    if duplicates.exists():
+        dup = duplicates.first()
+        messages.warning(
+            request,
+            f'Possible duplicate: "{dup.description}" on {dup.date} for ${dup.amount:.2f} already exists.'
+        )
+
     referring_url = request.META.get('HTTP_REFERER', '/')
-    
-    # Redirect to the referring URL
     return HttpResponseRedirect(referring_url)
 
 def add_reward_credit(request):
@@ -1164,7 +1178,22 @@ def import_csv_preview(request):
             "rows": rows,
             "column_map": column_map,
         }
-        # print(preview_rows)
+
+        # Flag potential duplicates in preview rows
+        for row in preview_rows:
+            try:
+                date_str = row.get("date", "")
+                amount_str = row.get("amount", "")
+                if date_str and amount_str:
+                    try:
+                        parsed_date = datetime.strptime(date_str, "%m/%d/%y").date()
+                    except ValueError:
+                        parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                    parsed_amount = float(amount_str.replace("$", "").replace(",", ""))
+                    if Transaction.objects.filter(date=parsed_date, amount=parsed_amount).exists():
+                        row["duplicate"] = True
+            except (ValueError, TypeError):
+                pass
 
         return render(request, "tracker/import_preview.html", {
             "preview_rows": preview_rows,

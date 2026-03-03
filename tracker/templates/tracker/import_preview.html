@@ -15,14 +15,16 @@
         {% for col in column_map.keys %}
           <th>{{ col|title }}</th>
         {% endfor %}
+        <th></th>
       </tr>
     </thead>
     <tbody>
       {% for row in preview_rows %}
-        <tr>
+        <tr{% if row.duplicate %} class="table-warning"{% endif %}>
           {% for key in column_map.keys %}
           <td>{{ row|get_item:key }}</td>
           {% endfor %}
+          <td>{% if row.duplicate %}<span class="text-warning">Possible duplicate</span>{% endif %}</td>
         </tr>
       {% endfor %}
     </tbody>
