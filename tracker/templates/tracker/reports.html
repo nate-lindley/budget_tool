@@ -110,6 +110,10 @@
       
       const pieData = {{ pie_data|safe }}.slice().sort((a, b) => (b.total || 0) - (a.total || 0));
       const lineData = {{ line_data|safe }};
+      const avgTrend = {{ avg_trend|safe }};
+      const hasAvgTrend = {{ has_avg_trend|yesno:"true,false" }};
+      const trendLookback = {{ trend_lookback }};
+      const dayLabels = Array.from({length: 31}, (_, i) => i + 1);
       const categories = pieData.map(e => e.category__name);
       const totals = pieData.map(e => e.total);
       const spendVsIncomeLabels = ['Income', 'Spend'];
@@ -169,26 +173,48 @@
         }
       });
 
+      const lineDatasets = [{
+        label: 'Cumulative Spend',
+        data: lineData.map(e => e.cumulative),
+        borderColor: '#0d6efd',
+        backgroundColor: 'transparent',
+        tension: 0.25,
+        pointRadius: 2,
+      }];
+
+      if (hasAvgTrend) {
+        lineDatasets.unshift({
+          label: `${trendLookback}mo Avg`,
+          data: avgTrend,
+          borderColor: 'rgba(100, 100, 100, 0.4)',
+          backgroundColor: 'transparent',
+          borderDash: [5, 5],
+          tension: 0.25,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+        });
+      }
+
       new Chart(lineCtx, {
         type: 'line',
         data: {
-          labels: lineData.map(e => e.date),
-          datasets: [{
-            label: 'Cumulative Spend',
-            data: lineData.map(e => e.cumulative),
-            borderColor: '#0d6efd',
-            backgroundColor: 'transparent',
-            tension: 0.25
-          }]
+          labels: dayLabels,
+          datasets: lineDatasets,
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
             legend: { position: 'top' },
-            title: {
-              display: true,
-            text: 'Cumulative Spend Over Month'
+            title: { display: true, text: 'Cumulative Spend Over Month' },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const val = context.raw;
+                  if (val === null) return null;
+                  return `${context.dataset.label}: $${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                }
+              }
             }
           },
           animation: baseAnimation,
@@ -200,6 +226,7 @@
             }
           },
           scales: {
+            x: { title: { display: true, text: 'Day of Month' } },
             y: {
               beginAtZero: true,
               title: { display: true, text: 'Amount ($)' }

@@ -47,7 +47,7 @@ Export any report view to CSV or generate a PDF summary. Include charts and tabl
 
 ## Rewards & Credit Cards
 
-### Rewards Optimization [ ]
+### Rewards Optimization [x]
 After logging a transaction, highlight when a purchase was made on a suboptimal card. Show what the best card would have been and how much more you could have earned. Help learn from mistakes and build better habits over time.
 
 ### Annual Fee Break-Even Analysis [ ]

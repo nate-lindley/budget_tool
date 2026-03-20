@@ -18,6 +18,8 @@ CREDIT_CATEGORY_Q = (
     Q(category__name__istartswith='credit-')
 )
 
+SPEND_TREND_LOOKBACK_MONTHS = 6
+
 BLANKET_MULTIPLIERS = {
     'cashback': Decimal('0.01'),
     'miles': Decimal('1.0'),
@@ -43,6 +45,35 @@ def comparison_value(source, raw_multiplier):
         return raw_multiplier
     effective_miles = raw_multiplier + CARD_CASH_MILES_BONUS if source.reward_type == 'card_cash_miles' else raw_multiplier
     return effective_miles * CPP
+
+
+def get_monthly_cumulative_spend(year, month):
+    """Returns a 31-element list of cumulative spend for the given month."""
+    transactions = annotate_net_amount(
+        Transaction.objects.filter(date__month=month, date__year=year)
+    ).exclude(category__name__iexact='income').exclude(
+        category__reporting_category__name__iexact='income'
+    ).exclude(CREDIT_CATEGORY_Q)
+
+    daily_totals = (
+        transactions.order_by("date")
+        .values("date")
+        .annotate(daily_total=Sum("net_amount"))
+    )
+
+    day_cumulative = {}
+    cumulative = 0.0
+    for item in daily_totals:
+        cumulative += float(item["daily_total"]) * -1
+        day_cumulative[item["date"].day] = cumulative
+
+    result = []
+    last_val = 0.0
+    for day in range(1, 32):
+        if day in day_cumulative:
+            last_val = day_cumulative[day]
+        result.append(last_val)
+    return result
 
 
 def annotate_reporting_category(queryset):
@@ -1282,11 +1313,36 @@ def reports_view(request):
         key=lambda item: (item.get("category__name") or "").lower(),
     )
 
-    # Convert line chart data to JSON-safe format
+    # Convert line chart data to JSON-safe format (day-of-month indexed)
     line_data_safe = [
-        {"date": item["date"], "cumulative": float(item["cumulative"])}
-        for item in final_line_data
+        {"date": i + 1, "cumulative": float(final_line_data[i]["cumulative"])}
+        for i in range(len(final_line_data))
     ]
+
+    # Pad completed past months to 31 days so the x-axis aligns with the avg trend line
+    is_current_month = (year == datetime.today().year and month == datetime.today().month)
+    if not is_current_month and len(line_data_safe) < 31:
+        last_val = line_data_safe[-1]["cumulative"] if line_data_safe else 0
+        for extra_day in range(len(line_data_safe) + 1, 32):
+            line_data_safe.append({"date": extra_day, "cumulative": last_val})
+
+    # Compute average cumulative spend trend over past SPEND_TREND_LOOKBACK_MONTHS months
+    avg_trend_values = [0.0] * 31
+    months_with_data = 0
+    lookback_y, lookback_m = year, month
+    for _ in range(SPEND_TREND_LOOKBACK_MONTHS):
+        lookback_m -= 1
+        if lookback_m == 0:
+            lookback_m = 12
+            lookback_y -= 1
+        monthly = get_monthly_cumulative_spend(lookback_y, lookback_m)
+        if any(v > 0 for v in monthly):
+            for i in range(31):
+                avg_trend_values[i] += monthly[i]
+            months_with_data += 1
+
+    has_avg_trend = months_with_data > 0
+    avg_trend = [round(v / months_with_data, 2) for v in avg_trend_values] if has_avg_trend else []
 
     if not month_data:
         # print(final_line_data)
@@ -1302,10 +1358,8 @@ def reports_view(request):
         if len(daily_totals) < 31:
             # Fill in the remaining days with 0 if there are less than 31 days
             daily_totals.extend([daily_totals[-1]] * (31 - len(daily_totals)))
-        # Create a new Month entry if it doesn't exist
+        # Create a new Month entry if it doesn't exist (not saved — ArrayField requires PostgreSQL)
         month_data = Month(name=month_name, total_spend=total_spent, total_income=income_total_amount, daily_spend=daily_totals)
-        # print(month_data)
-        # month_data.save()
 
     context = {
         "selected_month": month,
@@ -1314,6 +1368,9 @@ def reports_view(request):
         "total_spent": total_spent,
         "pie_data": pie_data_safe,
         "line_data": line_data_safe,
+        "avg_trend": avg_trend,
+        "has_avg_trend": has_avg_trend,
+        "trend_lookback": SPEND_TREND_LOOKBACK_MONTHS,
         "table_data": table_data,
         "months": [(i, calendar.month_name[i]) for i in range(1, 13)],
         "years": list(year_values),
