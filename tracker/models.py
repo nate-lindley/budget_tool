@@ -121,6 +121,35 @@ class DismissedSuggestion(models.Model):
         ordering = ['-dismissed_at']
 
 
+class SavingsGoal(models.Model):
+    name = models.CharField(max_length=200)
+    target_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    priority = models.PositiveIntegerField(default=1)
+    withdrawal_priority = models.PositiveIntegerField(default=1)
+    deadline = models.DateField(null=True, blank=True)
+    created_at = models.DateField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['priority', 'created_at']
+
+    def __str__(self):
+        return self.name
+
+
+class GoalContribution(models.Model):
+    goal = models.ForeignKey(SavingsGoal, on_delete=models.CASCADE, related_name='contributions')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    date = models.DateField()
+    note = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.goal.name} - ${self.amount} on {self.date}"
+
+
 class Month(models.Model):
     """
     Model representing a month for budget tracking.

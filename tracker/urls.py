@@ -26,4 +26,9 @@ urlpatterns = [
     path("delete_recurring/<int:recurring_id>/", views.delete_recurring_transaction, name="delete_recurring"),
     path("add_from_recurring/<int:recurring_id>/", views.add_from_recurring, name="add_from_recurring"),
     path("dismiss_suggestion/", views.dismiss_recurring_suggestion, name="dismiss_suggestion"),
+    path("goals/", views.goals_view, name="goals"),
+    path("add_goal/", views.add_goal, name="add_goal"),
+    path("edit_goal/<int:goal_id>/", views.edit_goal, name="edit_goal"),
+    path("delete_goal/<int:goal_id>/", views.delete_goal, name="delete_goal"),
+    path("add_contribution/<int:goal_id>/", views.add_contribution, name="add_contribution"),
 ]

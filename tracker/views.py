@@ -1614,8 +1614,9 @@ def rewards_tracker(request):
             ).aggregate(total=Sum('amount'))['total'] or 0
             card_cash_credits = abs(float(card_cash_credit_total))
             card_cash_pool = card_cash_earned + card_cash_credits
-            redeemable_rent = min(rent_spend, card_cash_pool)
-            rent_miles = redeemable_rent / 0.03 if redeemable_rent else 0
+            rent_coverable = card_cash_pool / 0.03 if card_cash_pool else 0
+            rent_points = min(rent_spend, rent_coverable)
+            bilt_cash_used = rent_points * 0.03
             miles_credit_total = Transaction.objects.filter(
                 source=source,
                 category__name__istartswith='miles-credit-',
@@ -1672,14 +1673,25 @@ def rewards_tracker(request):
 
             if rent_spend > 0:
                 reward_rows.append({
-                    'category_name': 'Rent (Redeemed Miles)',
+                    'category_name': 'Rent (Redeemed Points)',
                     'reporting_category_name': None,
-                    'multiplier': 1 / 0.03,
-                    'multiplier_label': '$0.03 -> 1 mile',
-                    'spend': rent_spend,
-                    'rewards': rent_miles,
+                    'multiplier': 1.0,
+                    'multiplier_label': f'1x (${bilt_cash_used:.2f} Bilt Cash used)',
+                    'spend': rent_points,
+                    'rewards': rent_points,
                     'rewards_format': 'miles',
                 })
+
+            card_cash_remaining = card_cash_pool - bilt_cash_used
+            reward_rows.append({
+                'category_name': 'Bilt Cash Remaining',
+                'reporting_category_name': None,
+                'multiplier': 0,
+                'multiplier_label': 'Balance',
+                'spend': 0,
+                'rewards': card_cash_remaining,
+                'rewards_format': 'cash',
+            })
 
             if credit_amount > 0:
                 reward_rows.append({
@@ -1706,7 +1718,7 @@ def rewards_tracker(request):
                 })
 
             total_spend = non_rent_spend + rent_spend
-            total_rewards_miles = non_rent_miles + rent_miles + bonus_miles + miles_credit_amount
+            total_rewards_miles = non_rent_miles + rent_points + bonus_miles + miles_credit_amount
             total_rewards_cash = credit_amount
             total_rewards = total_rewards_miles + total_rewards_cash
 
@@ -1993,3 +2005,219 @@ def category_year_view(request):
     }
 
     return render(request, "tracker/category_year.html", context)
+
+
+def goals_view(request):
+    goals = SavingsGoal.objects.filter(is_active=True)
+    if not goals.exists():
+        return render(request, "tracker/goals.html", {
+            "goals": [],
+            "avg_monthly_savings": 0,
+            "today": datetime.now().strftime("%Y-%m-%d"),
+        })
+
+    # Find earliest goal creation date to scope savings calculation
+    earliest = goals.order_by('created_at').first().created_at
+    today = date.today()
+
+    # Build list of (year, month) from earliest goal to now
+    months_list = []
+    current = date(earliest.year, earliest.month, 1)
+    while current <= today:
+        months_list.append((current.year, current.month))
+        if current.month == 12:
+            current = date(current.year + 1, 1, 1)
+        else:
+            current = date(current.year, current.month + 1, 1)
+
+    # Calculate monthly net savings using same pattern as ytd_report
+    transactions = annotate_net_amount(Transaction.objects.all())
+    total_positive = 0
+    total_negative = 0
+
+    for y, m in months_list:
+        income = transactions.filter(
+            date__year=y, date__month=m,
+            category__name__iexact='income'
+        ).exclude(CREDIT_CATEGORY_Q).aggregate(total=Sum('net_amount'))['total'] or 0
+
+        spend = transactions.exclude(
+            category__name__iexact='income'
+        ).exclude(CREDIT_CATEGORY_Q).filter(
+            date__year=y, date__month=m
+        ).aggregate(total=Sum('net_amount'))['total'] or 0
+
+        net = float(income) + float(spend)
+        if net > 0:
+            total_positive += net
+        else:
+            total_negative += abs(net)
+
+    num_months = len(months_list) or 1
+    avg_monthly_savings = (total_positive - total_negative) / num_months
+
+    # Gather manual contributions per goal
+    goal_data = []
+    for goal in goals:
+        manual_total = goal.contributions.aggregate(total=Sum('amount'))['total'] or 0
+        goal_data.append({
+            'goal': goal,
+            'manual': float(manual_total),
+            'auto_allocated': 0,
+            'contributions': goal.contributions.all()[:10],
+        })
+
+    # Pass 1: Fill from positive months (by priority order)
+    remaining_savings = total_positive
+    fill_ordered = sorted(goal_data, key=lambda g: (g['goal'].priority, g['goal'].created_at))
+    for g in fill_ordered:
+        needed = max(0, float(g['goal'].target_amount) - g['manual'])
+        auto = min(remaining_savings, needed)
+        remaining_savings -= auto
+        g['auto_allocated'] = auto
+
+    # Pass 2: Withdraw from negative months (by withdrawal_priority order)
+    remaining_deficit = total_negative
+    withdraw_ordered = sorted(goal_data, key=lambda g: (g['goal'].withdrawal_priority, g['goal'].created_at))
+    for g in withdraw_ordered:
+        deduction = min(remaining_deficit, g['auto_allocated'])
+        remaining_deficit -= deduction
+        g['auto_allocated'] -= deduction
+
+    # Compute final progress for each goal
+    for g in goal_data:
+        target = float(g['goal'].target_amount)
+        progress = min(target, g['auto_allocated'] + g['manual'])
+        g['progress'] = max(0, progress)
+        g['percent'] = round((g['progress'] / target) * 100, 1) if target > 0 else 0
+        g['remaining'] = max(0, target - g['progress'])
+
+        # Projected completion date
+        if g['remaining'] > 0 and avg_monthly_savings > 0:
+            months_needed = g['remaining'] / avg_monthly_savings
+            g['projected_date'] = add_months(today, int(months_needed) + 1)
+        else:
+            g['projected_date'] = None
+
+    # Re-sort by priority for display
+    goal_data.sort(key=lambda g: (g['goal'].priority, g['goal'].created_at))
+
+    return render(request, "tracker/goals.html", {
+        "goals": goal_data,
+        "avg_monthly_savings": round(avg_monthly_savings, 2),
+        "today": datetime.now().strftime("%Y-%m-%d"),
+    })
+
+
+def add_goal(request):
+    if request.method != "POST":
+        return HttpResponseRedirect("/goals/")
+    name = request.POST.get("name", "").strip()
+    target = request.POST.get("target_amount", "")
+    priority = request.POST.get("priority", "1")
+    withdrawal_priority = request.POST.get("withdrawal_priority", "1")
+    deadline = request.POST.get("deadline", "")
+
+    if not name or not target:
+        return HttpResponseRedirect("/goals/")
+
+    try:
+        target = float(target)
+        priority = int(priority)
+        withdrawal_priority = int(withdrawal_priority)
+    except ValueError:
+        return HttpResponseRedirect("/goals/")
+
+    goal = SavingsGoal(
+        name=name,
+        target_amount=target,
+        priority=priority,
+        withdrawal_priority=withdrawal_priority,
+    )
+    if deadline and is_valid_date(deadline):
+        goal.deadline = deadline
+    goal.save()
+    return HttpResponseRedirect("/goals/")
+
+
+def edit_goal(request, goal_id):
+    try:
+        goal = SavingsGoal.objects.get(id=goal_id)
+    except SavingsGoal.DoesNotExist:
+        return HttpResponseRedirect("/goals/")
+
+    if request.method != "POST":
+        return HttpResponseRedirect("/goals/")
+
+    name = request.POST.get("name", "").strip()
+    target = request.POST.get("target_amount", "")
+    priority = request.POST.get("priority", "")
+    withdrawal_priority = request.POST.get("withdrawal_priority", "")
+    deadline = request.POST.get("deadline", "")
+    is_active = request.POST.get("is_active", "on")
+
+    if name:
+        goal.name = name
+    if target:
+        try:
+            goal.target_amount = float(target)
+        except ValueError:
+            pass
+    if priority:
+        try:
+            goal.priority = int(priority)
+        except ValueError:
+            pass
+    if withdrawal_priority:
+        try:
+            goal.withdrawal_priority = int(withdrawal_priority)
+        except ValueError:
+            pass
+
+    if deadline and is_valid_date(deadline):
+        goal.deadline = deadline
+    elif not deadline:
+        goal.deadline = None
+
+    goal.is_active = is_active == "on"
+    goal.save()
+    return HttpResponseRedirect("/goals/")
+
+
+def delete_goal(request, goal_id):
+    if request.method == "POST":
+        try:
+            goal = SavingsGoal.objects.get(id=goal_id)
+            goal.delete()
+        except SavingsGoal.DoesNotExist:
+            pass
+    return HttpResponseRedirect("/goals/")
+
+
+def add_contribution(request, goal_id):
+    if request.method != "POST":
+        return HttpResponseRedirect("/goals/")
+    try:
+        goal = SavingsGoal.objects.get(id=goal_id)
+    except SavingsGoal.DoesNotExist:
+        return HttpResponseRedirect("/goals/")
+
+    amount = request.POST.get("amount", "")
+    date_val = request.POST.get("date", "")
+    note = request.POST.get("note", "").strip()
+
+    if not amount or not date_val or not is_valid_date(date_val):
+        return HttpResponseRedirect("/goals/")
+
+    try:
+        amount = float(amount)
+    except ValueError:
+        return HttpResponseRedirect("/goals/")
+
+    GoalContribution.objects.create(
+        goal=goal,
+        amount=amount,
+        date=date_val,
+        note=note,
+    )
+    return HttpResponseRedirect("/goals/")

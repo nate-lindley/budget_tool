@@ -1,0 +1,156 @@
+{% extends "tracker/base.html" %}
+{% load humanize %}
+{% load number_formatting %}
+
+{% block title %}Savings Goals{% endblock %}
+
+{% block content %}
+  <div class="section-actions">
+    <h2 class="mb-0">Savings Goals</h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addGoalModal">Add Goal</button>
+  </div>
+
+  <div class="card-panel mb-4">
+    <div class="d-flex align-items-center gap-3">
+      <span class="text-subtle">Average Monthly Savings:</span>
+      <span class="fs-5 fw-semibold {% if avg_monthly_savings >= 0 %}text-neutral{% else %}text-negative{% endif %}">
+        {{ avg_monthly_savings|dollar_format }}
+      </span>
+    </div>
+  </div>
+
+  {% if goals %}
+    {% for g in goals %}
+      <div class="card-panel mb-4">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <div>
+            <h4 class="mb-1">{{ g.goal.name }}</h4>
+            <small class="text-muted">
+              Fill priority: {{ g.goal.priority }} &middot; Withdrawal priority: {{ g.goal.withdrawal_priority }}
+              {% if g.goal.deadline %} &middot; Deadline: {{ g.goal.deadline }}{% endif %}
+            </small>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-success add-contribution-btn" data-bs-toggle="modal" data-bs-target="#addContributionModal"
+              data-id="{{ g.goal.id }}">
+              Add Contribution
+            </button>
+            <button class="btn btn-sm btn-warning edit-goal-btn" data-bs-toggle="modal" data-bs-target="#editGoalModal"
+              data-id="{{ g.goal.id }}"
+              data-name="{{ g.goal.name }}"
+              data-target="{{ g.goal.target_amount }}"
+              data-priority="{{ g.goal.priority }}"
+              data-withdrawal-priority="{{ g.goal.withdrawal_priority }}"
+              data-deadline="{{ g.goal.deadline|date:'Y-m-d' }}"
+              data-is-active="{{ g.goal.is_active }}">
+              Edit
+            </button>
+            <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_goal' g.goal.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">
+              Delete
+            </button>
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <div class="d-flex justify-content-between mb-1">
+            <span>{{ g.progress|dollar_format }} of {{ g.goal.target_amount|dollar_format }}</span>
+            <span>{{ g.percent }}%</span>
+          </div>
+          <div class="progress" style="height: 24px;">
+            <div class="progress-bar {% if g.percent >= 66 %}bg-success{% elif g.percent >= 33 %}bg-warning{% else %}bg-danger{% endif %}"
+                 role="progressbar" style="width: {{ g.percent }}%;" aria-valuenow="{{ g.percent }}" aria-valuemin="0" aria-valuemax="100">
+            </div>
+          </div>
+        </div>
+
+        <div class="d-flex gap-4 mb-3">
+          <small class="text-muted">Auto: {{ g.auto_allocated|dollar_format }}</small>
+          <small class="text-muted">Manual: {{ g.manual|dollar_format }}</small>
+          <small class="text-muted">Remaining: {{ g.remaining|dollar_format }}</small>
+          {% if g.projected_date %}
+            <small class="text-muted">Projected completion: {{ g.projected_date }}</small>
+          {% elif g.remaining == 0 %}
+            <small class="text-success fw-semibold">Goal reached!</small>
+          {% endif %}
+        </div>
+
+        {% if g.contributions %}
+          <details>
+            <summary class="text-muted mb-2" style="cursor: pointer;">Contributions</summary>
+            <table class="table table-sm table-striped mb-0">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in g.contributions %}
+                  <tr>
+                    <td>{{ c.date }}</td>
+                    <td>{{ c.amount|dollar_format }}</td>
+                    <td>{{ c.note|default:"—" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="card-panel">
+      <p class="table-note">No savings goals yet. Add one to start tracking!</p>
+    </div>
+  {% endif %}
+
+  {% include './modals/add_goal.html' %}
+  {% include './modals/edit_goal.html' %}
+  {% include './modals/add_contribution.html' %}
+  {% include './modals/confirm_delete.html' %}
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      // Edit goal modal
+      const editButtons = document.querySelectorAll('.edit-goal-btn');
+      const editForm = document.getElementById('editGoalForm');
+
+      editButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const id = button.getAttribute('data-id');
+          editForm.action = `{% url 'edit_goal' 0 %}`.replace(/0/, id);
+          document.getElementById('editGoalName').value = button.getAttribute('data-name');
+          document.getElementById('editGoalTarget').value = button.getAttribute('data-target');
+          document.getElementById('editGoalPriority').value = button.getAttribute('data-priority');
+          document.getElementById('editGoalWithdrawalPriority').value = button.getAttribute('data-withdrawal-priority');
+          document.getElementById('editGoalDeadline').value = button.getAttribute('data-deadline') || '';
+          document.getElementById('editGoalActive').checked = button.getAttribute('data-is-active') === 'True';
+        });
+      });
+
+      // Add contribution modal
+      const contributionButtons = document.querySelectorAll('.add-contribution-btn');
+      const contributionForm = document.getElementById('addContributionForm');
+
+      contributionButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const id = button.getAttribute('data-id');
+          contributionForm.action = `{% url 'add_contribution' 0 %}`.replace(/0/, id);
+        });
+      });
+
+      // Delete modal
+      const deleteButtons = document.querySelectorAll('.delete-btn');
+      const deleteForm = document.getElementById('confirmDeleteForm');
+
+      deleteButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          deleteForm.action = button.getAttribute('data-url');
+        });
+      });
+    });
+  </script>
+{% endblock %}
