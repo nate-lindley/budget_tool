@@ -38,6 +38,52 @@
     <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addRewardCreditModal">Add Credit</button>
   </div>
 
+  {% if card_recommendations %}
+  <div class="card-panel mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h4 class="mb-0">Card Recommendations</h4>
+      <button class="btn btn-sm btn-outline-secondary"
+              data-bs-toggle="collapse"
+              data-bs-target="#cardRecsTable"
+              aria-expanded="false">Show / Hide</button>
+    </div>
+    <p class="text-subtle small mb-2">Best card per category based on your configured reward multipliers.</p>
+    <div class="collapse" id="cardRecsTable">
+      <div class="table-responsive">
+        <table class="table table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Best Card</th>
+              <th>Rate</th>
+              <th>Runner-Up</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rec in card_recommendations %}
+            <tr {% if rec.is_quarterly %}class="table-warning"{% endif %}>
+              <td>{{ rec.category.name }}</td>
+              <td>
+                {{ rec.best_source.name }}
+                {% if rec.is_quarterly %}
+                  <span class="badge bg-warning text-dark ms-1">{{ rec.current_quarter }}</span>
+                {% endif %}
+              </td>
+              <td>{{ rec.best_rate_label }}</td>
+              <td class="text-subtle">
+                {% if rec.runner_up %}
+                  {{ rec.runner_up.source.name }} ({{ rec.runner_up.rate_label }})
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   {% if sources_data %}
     {% for entry in sources_data %}
       <div class="card-panel">

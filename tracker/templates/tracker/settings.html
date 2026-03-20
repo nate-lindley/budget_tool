@@ -32,7 +32,7 @@
                   <tr>
                     <td>{{ source.name }}</td>
                     <td>
-                      <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}" data-annual-fee="{{ source.annual_fee }}" data-reward-type="{{ source.reward_type }}" data-signup-bonus-miles="{{ source.signup_bonus_miles }}" data-signup-bonus-min-spend="{{ source.signup_bonus_min_spend }}">Edit</button>
+                      <button class="btn btn-sm btn-warning edit-source-btn" data-bs-toggle="modal" data-bs-target="#editSourceModal" data-id="{{ source.id }}" data-name="{{ source.name }}" data-annual-fee="{{ source.annual_fee }}" data-reward-type="{{ source.reward_type }}" data-signup-bonus-miles="{{ source.signup_bonus_miles }}" data-signup-bonus-min-spend="{{ source.signup_bonus_min_spend }}" data-opened-on="{{ source.opened_on|default:'' }}" data-closed-on="{{ source.closed_on|default:'' }}">Edit</button>
                       <button class="btn btn-sm btn-danger delete-btn" data-url="{% url 'delete_source' source.id %}" data-bs-toggle="modal" data-bs-target="#confirmDeleteModal">Delete</button>
                     </td>
                   </tr>
@@ -267,6 +267,8 @@
       const rewardTypeInput = document.getElementById('editSourceRewardType')
       const signupBonusMilesInput = document.getElementById('editSourceSignupBonusMiles')
       const signupBonusMinSpendInput = document.getElementById('editSourceSignupBonusMinSpend')
+      const openedOnInput = document.getElementById('editSourceOpenedOn')
+      const closedOnInput = document.getElementById('editSourceClosedOn')
       const rewardMapElement = document.getElementById('sourceRewardMap')
       const rewardMap = rewardMapElement ? JSON.parse(rewardMapElement.textContent) : {}
       const categoriesElement = document.getElementById('categoriesData')
@@ -349,6 +351,12 @@
           }
           if (signupBonusMinSpendInput) {
             signupBonusMinSpendInput.value = sourceSignupBonusMinSpend
+          }
+          if (openedOnInput) {
+            openedOnInput.value = button.getAttribute('data-opened-on')
+          }
+          if (closedOnInput) {
+            closedOnInput.value = button.getAttribute('data-closed-on')
           }
           if (rewardCategoryList) {
             rewardCategoryList.innerHTML = ''

@@ -36,6 +36,8 @@ class Source(models.Model):
     signup_bonus_miles = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     signup_bonus_min_spend = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     signup_bonus_awarded_on = models.DateField(null=True, blank=True)
+    opened_on = models.DateField(null=True, blank=True)
+    closed_on = models.DateField(null=True, blank=True)
 
     class Meta:
         """

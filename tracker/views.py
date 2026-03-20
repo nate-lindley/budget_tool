@@ -1,6 +1,7 @@
 from django.shortcuts import render, HttpResponseRedirect
 from django.contrib import messages
 from .models import *
+from decimal import Decimal
 from datetime import datetime, timedelta, date
 from django.db.models import Sum, Q, Exists, OuterRef, Min, Max, F, Value, DecimalField, Case, When, BooleanField
 import calendar
@@ -16,6 +17,32 @@ CREDIT_CATEGORY_Q = (
     Q(category__name__istartswith='miles-credit-') |
     Q(category__name__istartswith='credit-')
 )
+
+BLANKET_MULTIPLIERS = {
+    'cashback': Decimal('0.01'),
+    'miles': Decimal('1.0'),
+    'card_cash_miles': Decimal('2.0'),  # 2x miles on non-rent spend
+    'none': Decimal('0'),
+}
+
+# card_cash_miles sources also earn card cash, added as a miles equivalent for comparison purposes.
+# 0.5 bonus makes them rank above a card with the same miles rate but below one with more miles.
+CARD_CASH_MILES_BONUS = Decimal('0.5')
+
+# Cents per point/mile used to normalize miles against cashback for comparison only.
+# Display always shows raw miles (e.g. "2.00x"), never the converted value.
+CPP = Decimal('0.012')
+
+
+def comparison_value(source, raw_multiplier):
+    """Return a dollar-per-dollar comparison value for ranking cards against each other.
+    Miles are converted to dollar value using CPP; cashback is already in dollar terms.
+    card_cash_miles gets the 0.5-mile card-cash bonus before conversion.
+    """
+    if source.reward_type == 'cashback':
+        return raw_multiplier
+    effective_miles = raw_multiplier + CARD_CASH_MILES_BONUS if source.reward_type == 'card_cash_miles' else raw_multiplier
+    return effective_miles * CPP
 
 
 def annotate_reporting_category(queryset):
@@ -37,6 +64,140 @@ def quarter_label(date_value):
         return ""
     quarter = (date_value.month - 1) // 3 + 1
     return f"{date_value.year}Q{quarter}"
+
+
+def get_better_card_tip(transaction):
+    """Check if a better reward card existed for this transaction's category/amount."""
+    if not transaction.category or not transaction.source:
+        return None
+    if transaction.amount <= 0:
+        return None
+    cat_name = transaction.category.name.lower()
+    if cat_name.startswith('card-cash-') or cat_name.startswith('miles-credit-') or cat_name.startswith('credit-'):
+        return None
+
+    current_quarter = quarter_label(transaction.date)
+
+    reward_cats = RewardCategory.objects.filter(
+        category=transaction.category
+    ).select_related('source')
+
+    configured = {}
+    for rc in reward_cats:
+        if rc.applicable_quarter and rc.applicable_quarter != current_quarter:
+            continue
+        configured[rc.source_id] = rc.multiplier
+
+    today = date.today()
+    all_sources = Source.objects.exclude(reward_type='none').filter(
+        Q(opened_on__isnull=True) | Q(opened_on__lte=today)
+    ).filter(
+        Q(closed_on__isnull=True) | Q(closed_on__gte=today)
+    )
+
+    def effective_raw(source):
+        return configured[source.id] if source.id in configured else BLANKET_MULTIPLIERS.get(source.reward_type, Decimal('0'))
+
+    used_raw = effective_raw(transaction.source)
+    used_cmp = comparison_value(transaction.source, used_raw)
+
+    best_source = None
+    best_raw = used_raw
+    best_cmp = used_cmp
+    for source in all_sources:
+        raw = effective_raw(source)
+        cmp = comparison_value(source, raw)
+        if cmp > best_cmp:
+            best_cmp = cmp
+            best_raw = raw
+            best_source = source
+
+    if best_source is None:
+        return None
+
+    missed_value = (best_cmp - used_cmp) * transaction.amount
+    return {
+        'best_source_name': best_source.name,
+        'best_rate_label': format_rate_label(best_raw, best_source.reward_type),
+        'used_rate_label': format_rate_label(used_raw, transaction.source.reward_type),
+        'missed_value': missed_value,
+        'amount': transaction.amount,
+    }
+
+
+def format_rate_label(multiplier, reward_type):
+    if reward_type == 'cashback':
+        percent = multiplier * 100
+        if percent == int(percent):
+            return f"{int(percent)}%"
+        return f"{percent:.2f}%"
+    return f"{multiplier:.2f}x"
+
+
+def build_card_recommendations():
+    """For each category with configured reward multipliers, return the best card.
+    Blanket rates from all active cards are considered alongside explicit RewardCategory entries,
+    so a card with a strong all-category rate appears as a candidate for every relevant category.
+    """
+    current_quarter = quarter_label(date.today())
+    today = date.today()
+
+    active_sources = list(Source.objects.exclude(reward_type='none').filter(
+        Q(opened_on__isnull=True) | Q(opened_on__lte=today)
+    ).filter(
+        Q(closed_on__isnull=True) | Q(closed_on__gte=today)
+    ))
+
+    reward_cats = RewardCategory.objects.select_related('source', 'category').filter(
+        source__in=active_sources
+    )
+
+    # Build: category -> {source_id -> (multiplier, is_quarterly)}
+    # Start with blanket rates for all active sources across every category that has
+    # at least one explicit RewardCategory entry.
+    explicit_categories = {}  # category -> set of source_ids with explicit entries
+    configured = {}           # (category, source_id) -> (multiplier, is_quarterly)
+
+    for rc in reward_cats:
+        active_q = (not rc.applicable_quarter) or (rc.applicable_quarter == current_quarter)
+        if not active_q:
+            continue
+        cat = rc.category
+        if cat not in explicit_categories:
+            explicit_categories[cat] = set()
+        explicit_categories[cat].add(rc.source_id)
+        configured[(cat, rc.source_id)] = (rc.multiplier, bool(rc.applicable_quarter))
+
+    recommendations = []
+    for category in sorted(explicit_categories.keys(), key=lambda c: c.name):
+        entries = []
+        for source in active_sources:
+            if (category, source.id) in configured:
+                raw_multiplier, is_quarterly = configured[(category, source.id)]
+            else:
+                raw_multiplier = BLANKET_MULTIPLIERS.get(source.reward_type, Decimal('0'))
+                is_quarterly = False
+            entries.append((source, comparison_value(source, raw_multiplier), raw_multiplier, is_quarterly))
+
+        sorted_entries = sorted(entries, key=lambda e: e[1], reverse=True)
+        best_source, best_cmp, best_raw, is_quarterly = sorted_entries[0]
+        runner_up = sorted_entries[1] if len(sorted_entries) > 1 else None
+        recommendations.append({
+            'category': category,
+            'best_source': best_source,
+            'best_multiplier': best_raw,
+            'best_rate_label': format_rate_label(best_raw, best_source.reward_type),
+            'best_reward_type': best_source.reward_type,
+            'is_quarterly': is_quarterly,
+            'current_quarter': current_quarter,
+            'runner_up': {
+                'source': runner_up[0],
+                'multiplier': runner_up[2],
+                'rate_label': format_rate_label(runner_up[2], runner_up[0].reward_type),
+                'reward_type': runner_up[0].reward_type,
+            } if runner_up else None,
+        })
+    return recommendations
 
 
 def quarter_date_range(label):
@@ -199,6 +360,15 @@ def add_transaction(request):
         messages.warning(
             request,
             f'Possible duplicate: "{dup.description}" on {dup.date} for ${dup.amount:.2f} already exists.'
+        )
+
+    tip = get_better_card_tip(new_transaction)
+    if tip:
+        messages.info(
+            request,
+            f"Tip: {tip['best_source_name']} earns more on {new_transaction.category.name} "
+            f"({tip['best_rate_label']} vs {tip['used_rate_label']}) — "
+            f"~${tip['missed_value']:.2f} more in value on this ${tip['amount']:.2f} purchase."
         )
 
     referring_url = request.META.get('HTTP_REFERER', '/')
@@ -758,6 +928,10 @@ def edit_source(request, source_id):
                 source.signup_bonus_min_spend = float(request.POST['signup_bonus_min_spend'])
             except ValueError:
                 print("Invalid signup bonus min spend value")
+        if 'opened_on' in request.POST:
+            source.opened_on = request.POST['opened_on'] or None
+        if 'closed_on' in request.POST:
+            source.closed_on = request.POST['closed_on'] or None
         source.save()  # Save the updated source to the database
         posted_multiplier_keys = [key for key in request.POST if key.startswith("reward_multiplier_")]
         posted_category_ids = {key.split("reward_multiplier_")[-1] for key in posted_multiplier_keys}
@@ -1899,6 +2073,7 @@ def rewards_tracker(request):
         'total_credits_earned': total_credits_earned,
         'sources': Source.objects.order_by('name'),
         'today': today,
+        'card_recommendations': build_card_recommendations(),
     }
 
     return render(request, 'tracker/rewards.html', context)
