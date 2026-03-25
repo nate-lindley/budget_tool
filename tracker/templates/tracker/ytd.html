@@ -57,7 +57,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for entry in ytd_data %}
+        {% for entry in ytd_data|dictsort:"category__name" %}
           <tr {% if entry.category__id %}class="clickable-row" data-href="/category_year/?category={{ entry.category__id }}&year={{ year }}&view={{ view_mode }}"{% endif %}>
             <td>{{ entry.category__name }}</td>
             <td>{{ entry.total|dollar_format }}</td>
