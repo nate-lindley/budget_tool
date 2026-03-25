@@ -8,9 +8,26 @@
 {% block content %}
   <div class="section-header">
     <h2>{{ overview_title }}</h2>
-    <div class="btn-group mt-2" role="group" aria-label="View selector">
-      <a class="btn btn-sm {% if view_mode == 'ytd' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/ytd_report/">YTD</a>
-      <a class="btn btn-sm {% if view_mode == 'ttm' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/ytd_report/?view=ttm">Trailing 12 Months</a>
+    <div class="d-flex align-items-center gap-3 mt-2 flex-wrap">
+      <div class="btn-group" role="group" aria-label="View selector">
+        <a class="btn btn-sm {% if view_mode == 'ytd' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/ytd_report/?view=ytd&year={{ year }}">Yearly</a>
+        <a class="btn btn-sm {% if view_mode == 'ttm' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/ytd_report/?view=ttm">Trailing 12 Months</a>
+      </div>
+      {% if view_mode == 'ytd' %}
+      <div class="d-flex align-items-center gap-2">
+        {% if prev_year %}
+          <a class="btn btn-sm btn-outline-secondary" href="/ytd_report/?view=ytd&year={{ prev_year }}">&laquo; {{ prev_year }}</a>
+        {% else %}
+          <span class="btn btn-sm btn-outline-secondary disabled">&laquo;</span>
+        {% endif %}
+        <span class="fw-semibold px-2">{{ year }}</span>
+        {% if next_year %}
+          <a class="btn btn-sm btn-outline-secondary" href="/ytd_report/?view=ytd&year={{ next_year }}">{{ next_year }} &raquo;</a>
+        {% else %}
+          <span class="btn btn-sm btn-outline-secondary disabled">&raquo;</span>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -36,6 +53,7 @@
           <th>Monthly Budget</th>
           <th>Avg Surplus/Deficit</th>
           <th>Total Surplus/Deficit</th>
+          {% if show_remaining %}<th title="{{ months_remaining }} months remaining in year">Remaining Monthly Budget</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -52,6 +70,11 @@
             <td class="{% if entry.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
               {{ entry.total_surplus|dollar_format }}
             </td>
+            {% if show_remaining %}
+            <td class="{% if entry.remaining_monthly is not None and entry.remaining_monthly < 0 %}text-negative{% else %}text-positive{% endif %}">
+              {% if entry.remaining_monthly is not None %}{{ entry.remaining_monthly|dollar_format }}{% else %}—{% endif %}
+            </td>
+            {% endif %}
           </tr>
         {% endfor %}
         <tr class="summary-row">
@@ -66,6 +89,11 @@
           <td class="{% if total_data.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
             {{ total_data.total_surplus|dollar_format }}
           </td>
+          {% if show_remaining %}
+          <td class="{% if total_data.remaining_monthly is not None and total_data.remaining_monthly < 0 %}text-negative{% else %}text-positive{% endif %}">
+            {% if total_data.remaining_monthly is not None %}{{ total_data.remaining_monthly|dollar_format }}{% else %}—{% endif %}
+          </td>
+          {% endif %}
         </tr>
         <tr class="clickable-row" data-href="/category_year/?category={{ income_data.category__id }}&year={{ year }}&view={{ view_mode }}">
           <td>{{ income_data.category__name }}</td>
@@ -79,6 +107,7 @@
           <td class="{% if income_data.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
             {{ income_data.total_surplus|dollar_format }}
           </td>
+          {% if show_remaining %}<td>—</td>{% endif %}
         </tr>
         <tr>
           <td>{{ savings_data.category__name }}</td>
@@ -92,6 +121,7 @@
           <td class="{% if savings_data.total_surplus < 0 %}text-negative{% else %}text-positive{% endif %}">
             {{ savings_data.total_surplus|dollar_format }}
           </td>
+          {% if show_remaining %}<td>—</td>{% endif %}
         </tr>
       </tbody>
     </table>

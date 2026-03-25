@@ -1505,14 +1505,21 @@ def ytd_report(request):
         return new_year, new_month
 
     now = datetime.now()
-    year = now.year
+    current_year = now.year
     current_month = now.month
     view_mode = request.GET.get("view", "ytd")
     if view_mode not in {"ytd", "ttm"}:
         view_mode = "ytd"
 
+    # Year selection (only applies to ytd mode)
+    try:
+        year = int(request.GET.get("year", current_year))
+    except (ValueError, TypeError):
+        year = current_year
+    year = max(2000, min(year, current_year))
+
     if view_mode == "ttm":
-        months = [shift_month(year, current_month, -offset) for offset in range(11, -1, -1)]
+        months = [shift_month(current_year, current_month, -offset) for offset in range(11, -1, -1)]
         start_year, start_month = months[0]
         start_date = datetime(start_year, start_month, 1).date()
         end_date = now.date()
@@ -1521,11 +1528,14 @@ def ytd_report(request):
             Transaction.objects.filter(date__gte=start_date, date__lte=end_date)
         )
     else:
-        months = [(year, month) for month in range(1, current_month + 1)]
-        months_count = current_month
-        # Transactions for the year
+        if year == current_year:
+            months = [(year, month) for month in range(1, current_month + 1)]
+            months_count = current_month
+        else:
+            months = [(year, month) for month in range(1, 13)]
+            months_count = 12
         transactions = annotate_net_amount(
-            Transaction.objects.filter(date__year=year, date__month__lte=current_month)
+            Transaction.objects.filter(date__year=year)
         )
 
     # Total spent per reporting category (excluding income)
@@ -1549,23 +1559,30 @@ def ytd_report(request):
         .annotate(total=Sum('net_amount'))
     )
 
+    show_remaining = (view_mode == 'ytd' and year == current_year)
+    months_remaining = 12 - current_month if show_remaining else 0
+
     ytd_data = []
     total_spend = 0
     total_budget = 0
+    total_spent_sum = 0
     category_pie_data = []
     for entry in spending_data:
         avg_per_month = entry['total'] / months_count
         budget = entry['reporting_category_budget'] or 0
         avg_surplus = budget - avg_per_month
+        annual_budget = entry['reporting_category_budget'] * 12 if entry['reporting_category_budget'] else 0
+        remaining_monthly = (annual_budget - entry['total']) / months_remaining if months_remaining > 0 else None
         ytd_data.append({
             'category__name': entry['reporting_category_name'],
             'category__id': entry['reporting_category_id'],
             'total': entry['total'],
-            'annual_budget': entry['reporting_category_budget'] * 12 if entry['reporting_category_budget'] else 0,
+            'annual_budget': annual_budget,
             'avg_per_month': avg_per_month,
-            'budget': budget, 
+            'budget': budget,
             'avg_surplus': avg_surplus,
             'total_surplus': avg_surplus * months_count,
+            'remaining_monthly': remaining_monthly,
         })
         category_pie_data.append({
             "label": entry["reporting_category_name"],
@@ -1574,19 +1591,23 @@ def ytd_report(request):
         })
         total_spend += avg_per_month
         total_budget += budget
+        total_spent_sum += entry['total']
 
     # Sort data by total spend descending for consistent display
     ytd_data = sorted(ytd_data, key=lambda x: x["total"], reverse=True)
     category_pie_data = sorted(category_pie_data, key=lambda x: x["total"], reverse=True)
 
+    total_annual_budget = total_budget * 12
+    total_remaining_monthly = (total_annual_budget - total_spent_sum) / months_remaining if months_remaining > 0 else None
     total_data = {
         'category__name': 'Total Spend',
         'total': (total_spend * months_count),
-        'annual_budget': (total_budget * 12),
+        'annual_budget': total_annual_budget,
         'avg_per_month': total_spend,
         'budget': total_budget,
         'avg_surplus': (total_budget - total_spend),
-        'total_surplus': ((total_budget - total_spend) * months_count)
+        'total_surplus': ((total_budget - total_spend) * months_count),
+        'remaining_monthly': total_remaining_monthly,
     }
 
     # print(f'total_spend: {total_spend}')
@@ -1651,7 +1672,24 @@ def ytd_report(request):
             'running': float(round(running_average, 2))
         })
 
-    print(savings_chart_data)
+    if view_mode == 'ttm':
+        page_title = 'Trailing 12 Months Tracker'
+        overview_title = 'Trailing 12 Months Spending Overview'
+        period_label = 'Trailing 12 Months'
+    elif year == current_year:
+        page_title = 'Year-to-Date Tracker'
+        overview_title = 'Year-to-Date Spending Overview'
+        period_label = 'YTD'
+    else:
+        page_title = f'{year} Annual Summary'
+        overview_title = f'{year} Spending Overview'
+        period_label = str(year)
+
+    # Determine available years from transaction data
+    min_year = Transaction.objects.aggregate(min_year=Min('date__year'))['min_year'] or current_year
+    prev_year = year - 1 if year > min_year else None
+    next_year = year + 1 if year < current_year else None
+
     context = {
         'ytd_data': ytd_data,
         'savings_chart_data': savings_chart_data,
@@ -1659,11 +1697,15 @@ def ytd_report(request):
         'income_data': income_data,
         'savings_data': savings_data,
         'year': year,
+        'prev_year': prev_year,
+        'next_year': next_year,
         'category_pie_data': category_pie_data,
         'view_mode': view_mode,
-        'page_title': 'Trailing 12 Months Tracker' if view_mode == 'ttm' else 'Year-to-Date Tracker',
-        'overview_title': 'Trailing 12 Months Spending Overview' if view_mode == 'ttm' else 'Year-to-Date Spending Overview',
-        'period_label': 'Trailing 12 Months' if view_mode == 'ttm' else 'YTD',
+        'page_title': page_title,
+        'overview_title': overview_title,
+        'period_label': period_label,
+        'show_remaining': show_remaining,
+        'months_remaining': months_remaining,
     }
 
     return render(request, 'tracker/ytd.html', context)
