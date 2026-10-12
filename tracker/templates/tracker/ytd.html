@@ -34,6 +34,10 @@
   <div class="charts-row">
     <div class="chart-card">
       <h5>Monthly Net</h5>
+      <div class="btn-group btn-group-sm mb-2 d-flex justify-content-center" role="group" aria-label="Savings chart mode">
+        <button type="button" class="btn btn-outline-secondary active" data-savings-mode="net">Net</button>
+        <button type="button" class="btn btn-outline-secondary" data-savings-mode="spend_income">Spend &amp; Income</button>
+      </div>
       <canvas id="savingsChart"></canvas>
     </div>
     <div class="chart-card">
@@ -153,32 +157,52 @@
       }
     }
 
-    new Chart(document.getElementById('savingsChart'), {
+    const savingsDatasetsByMode = {
+      net: [
+        {
+          label: 'Net Savings ($)',
+          data: savingsData.map(e => e.savings),
+          backgroundColor: savingsData.map(e => e.savings >= 0 ? '#28a745' : '#dc3545'),
+          yAxisID: 'y',
+          order: 1
+        },
+        {
+          label: '3-Month Avg ($)',
+          data: savingsData.map(e => e.running),
+          type: 'line',
+          borderColor: '#007bff',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          yAxisID: 'y',
+          order: 0
+        }
+      ],
+      spend_income: [
+        {
+          label: 'Income ($)',
+          data: savingsData.map(e => e.income),
+          backgroundColor: '#28a745',
+          yAxisID: 'y',
+          order: 1
+        },
+        {
+          label: 'Spend ($)',
+          data: savingsData.map(e => Math.abs(e.spend)),
+          backgroundColor: '#dc3545',
+          yAxisID: 'y',
+          order: 1
+        }
+      ]
+    };
+
+    const savingsChart = new Chart(document.getElementById('savingsChart'), {
       type: 'bar',
       data: {
         labels: savingsData.map(e => e.month),
-        datasets: [
-          {
-            label: 'Net Savings ($)',
-            data: savingsData.map(e => e.savings),
-            backgroundColor: savingsData.map(e => e.savings >= 0 ? '#28a745' : '#dc3545'),
-            yAxisID: 'y',
-            order: 1
-          },
-          {
-            label: '3-Month Avg ($)',
-            data: savingsData.map(e => e.running),
-            type: 'line',
-            borderColor: '#007bff',
-            backgroundColor: 'transparent',
-            borderWidth: 2,
-            tension: 0.3,
-            pointRadius: 3,
-            pointHoverRadius: 5,
-            yAxisID: 'y',
-            order: 0
-          }
-        ]
+        datasets: savingsDatasetsByMode.net
       },
       options: {
         maintainAspectRatio: false,
@@ -193,7 +217,7 @@
           tooltip: {
             callbacks: {
               label: function(context) {
-                return `$${context.raw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                return `${context.dataset.label}: $${context.raw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
               }
             }
           },
@@ -211,6 +235,15 @@
           }
         }
       }
+    });
+
+    document.querySelectorAll('[data-savings-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.savingsMode;
+        document.querySelectorAll('[data-savings-mode]').forEach(b => b.classList.toggle('active', b === btn));
+        savingsChart.data.datasets = savingsDatasetsByMode[mode];
+        savingsChart.update();
+      });
     });
 
     new Chart(document.getElementById('categoryPieChart'), {

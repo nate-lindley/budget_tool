@@ -21,6 +21,7 @@ urlpatterns = [
     path("mtd_report/", views.mtd_report, name="mtd_report"),
     path("rewards/", views.rewards_tracker, name="rewards_tracker"),
     path("category_year/", views.category_year_view, name="category_year"),
+    path("cost_explorer/", views.cost_explorer_view, name="cost_explorer"),
     path("add_recurring/", views.add_recurring_transaction, name="add_recurring"),
     path("edit_recurring/<int:recurring_id>/", views.edit_recurring_transaction, name="edit_recurring"),
     path("delete_recurring/<int:recurring_id>/", views.delete_recurring_transaction, name="delete_recurring"),

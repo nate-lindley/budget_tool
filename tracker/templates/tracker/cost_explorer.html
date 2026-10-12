@@ -1,0 +1,279 @@
+{% extends "tracker/base.html" %}
+{% load static %}
+{% load humanize %}
+{% load number_formatting %}
+
+{% block title %}Cost Explorer{% endblock %}
+
+{% block content %}
+  <div class="section-header">
+    <h2>Cost Explorer</h2>
+    <p class="muted-note">Break down spend by category or source over any date range.</p>
+  </div>
+
+  <div class="explorer-layout">
+    <aside class="explorer-filters card-panel">
+      <form method="get" id="explorerForm">
+        <div class="filter-section">
+          <label class="section-label">Date Range</label>
+          <select class="form-select form-select-sm mb-2" name="range" id="rangePreset">
+            <option value="7d" {% if range_preset == '7d' %}selected{% endif %}>Last 7 Days</option>
+            <option value="30d" {% if range_preset == '30d' %}selected{% endif %}>Last 30 Days</option>
+            <option value="mtd" {% if range_preset == 'mtd' %}selected{% endif %}>Month to Date</option>
+            <option value="3m" {% if range_preset == '3m' %}selected{% endif %}>Last 3 Months</option>
+            <option value="6m" {% if range_preset == '6m' %}selected{% endif %}>Last 6 Months</option>
+            <option value="ytd" {% if range_preset == 'ytd' %}selected{% endif %}>Year to Date</option>
+            <option value="12m" {% if range_preset == '12m' %}selected{% endif %}>Last 12 Months</option>
+            <option value="last_year" {% if range_preset == 'last_year' %}selected{% endif %}>Last Year</option>
+            <option value="custom" {% if range_preset == 'custom' %}selected{% endif %}>Custom Range</option>
+          </select>
+          <div class="d-flex flex-column gap-2" id="customDateInputs">
+            <input type="date" class="form-control form-control-sm" name="start_date" id="startDateInput" value="{{ start_date }}">
+            <input type="date" class="form-control form-control-sm" name="end_date" id="endDateInput" value="{{ end_date }}">
+          </div>
+        </div>
+
+        <div class="filter-section">
+          <label class="section-label">Group By</label>
+          <div class="btn-group btn-group-sm w-100" role="group">
+            <input type="radio" class="btn-check" name="group_by" id="groupByCategory" value="category" autocomplete="off" {% if group_by == 'category' %}checked{% endif %}>
+            <label class="btn btn-outline-secondary" for="groupByCategory">Category</label>
+            <input type="radio" class="btn-check" name="group_by" id="groupBySource" value="source" autocomplete="off" {% if group_by == 'source' %}checked{% endif %}>
+            <label class="btn btn-outline-secondary" for="groupBySource">Source</label>
+          </div>
+        </div>
+
+        <input type="hidden" name="filtered" value="1">
+
+        <div class="filter-section">
+          <div class="d-flex justify-content-between align-items-baseline">
+            <label class="section-label">Categories</label>
+            <span class="select-toggles small" data-target="category">
+              <a href="#" data-select="all">All</a> · <a href="#" data-select="none">None</a>
+            </span>
+          </div>
+          <div class="filter-checklist">
+            {% for category in all_categories %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="category" value="{{ category.id }}" id="cat-{{ category.id }}" {% if category.id in selected_category_ids %}checked{% endif %}>
+                <label class="form-check-label" for="cat-{{ category.id }}">{{ category.name }}</label>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="filter-section">
+          <div class="d-flex justify-content-between align-items-baseline">
+            <label class="section-label">Sources</label>
+            <span class="select-toggles small" data-target="source">
+              <a href="#" data-select="all">All</a> · <a href="#" data-select="none">None</a>
+            </span>
+          </div>
+          <div class="filter-checklist">
+            {% for source in all_sources %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="source" value="{{ source.id }}" id="src-{{ source.id }}" {% if source.id in selected_source_ids %}checked{% endif %}>
+                <label class="form-check-label" for="src-{{ source.id }}">{{ source.name }}</label>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="filter-section">
+          <a href="{% url 'cost_explorer' %}" class="btn btn-outline-secondary btn-sm w-100">Reset</a>
+        </div>
+      </form>
+    </aside>
+
+    <div class="explorer-main">
+      <div class="chart-card">
+        <h5>Spend by {% if group_by == 'source' %}Source{% else %}Category{% endif %}</h5>
+        <canvas id="explorerChart"></canvas>
+      </div>
+
+      <div class="table-wrapper mt-4">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>{% if group_by == 'source' %}Source{% else %}Category{% endif %}</th>
+              <th>Total</th>
+              <th>% of Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for g in group_list %}
+              <tr {% if g.id %}class="clickable-row" data-href="/?{% if group_by == 'source' %}source{% else %}category{% endif %}={{ g.id }}&start_date={{ start_date }}&end_date={{ end_date }}"{% endif %}>
+                <td>{{ g.name }}</td>
+                <td>{{ g.total|dollar_format }}</td>
+                <td>{{ g.percent|floatformat:1 }}%</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="3" class="center-text muted-note">No transactions match these filters.</td></tr>
+            {% endfor %}
+            <tr class="summary-row">
+              <td>Total</td>
+              <td>{{ grand_total|dollar_format }}</td>
+              <td>100.0%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% static 'tracker/vendor/chart.umd.min.js' %}"></script>
+  {{ month_labels|json_script:"month-labels-data" }}
+  {{ month_ym|json_script:"month-ym-data" }}
+  {{ group_list|json_script:"group-list-data" }}
+  <script>
+    const readJson = (id) => JSON.parse(document.getElementById(id).textContent);
+    const monthLabels = readJson('month-labels-data');
+    const monthYm = readJson('month-ym-data');
+    const groupList = readJson('group-list-data');
+    const groupBy = '{{ group_by }}';
+    const startDate = '{{ start_date }}';
+    const endDate = '{{ end_date }}';
+
+    document.querySelectorAll('.clickable-row').forEach(row => {
+      row.addEventListener('click', () => {
+        window.location.href = row.dataset.href;
+      });
+    });
+
+    const explorerForm = document.getElementById('explorerForm');
+    const rangePreset = document.getElementById('rangePreset');
+    const startDateInput = document.getElementById('startDateInput');
+    const endDateInput = document.getElementById('endDateInput');
+
+    // Every control auto-submits. One shared debounce timer so rapid changes
+    // (ticking several boxes, typing a date) collapse into a single reload.
+    let submitTimer = null;
+    const scheduleSubmit = (delayMs) => {
+      if (submitTimer) clearTimeout(submitTimer);
+      submitTimer = setTimeout(() => explorerForm.submit(), delayMs);
+    };
+
+    // The page reloads on each change; keep the user's place instead of
+    // jumping back to the top / resetting the checklist scroll.
+    const SCROLL_KEY = 'costExplorerScroll';
+    const checklists = Array.from(document.querySelectorAll('.filter-checklist'));
+    explorerForm.addEventListener('submit', () => {
+      try {
+        sessionStorage.setItem(SCROLL_KEY, JSON.stringify({
+          page: window.scrollY,
+          lists: checklists.map(el => el.scrollTop)
+        }));
+      } catch (e) { /* storage unavailable: just lose scroll position */ }
+    });
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || 'null');
+      sessionStorage.removeItem(SCROLL_KEY);
+      if (saved) {
+        window.scrollTo(0, saved.page || 0);
+        checklists.forEach((el, i) => { el.scrollTop = (saved.lists || [])[i] || 0; });
+      }
+    } catch (e) { /* ignore */ }
+
+    rangePreset.addEventListener('change', () => {
+      if (rangePreset.value !== 'custom') scheduleSubmit(0);
+    });
+
+    // Native date inputs fire 'change' after each completed segment (not just on
+    // blur), so submit on a longer debounce to avoid cutting typing short.
+    [startDateInput, endDateInput].forEach(input => {
+      const onDateEdit = () => {
+        rangePreset.value = 'custom';
+        scheduleSubmit(1200);
+      };
+      input.addEventListener('input', onDateEdit);
+      input.addEventListener('change', onDateEdit);
+    });
+
+    // Group-by radios and category/source checkboxes: short debounce so a quick
+    // run of clicks is batched, but it still feels immediate.
+    explorerForm.querySelectorAll('input[name="group_by"], input[name="category"], input[name="source"]')
+      .forEach(input => input.addEventListener('change', () => scheduleSubmit(350)));
+
+    document.querySelectorAll('.select-toggles a').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const name = link.closest('.select-toggles').dataset.target;
+        const checked = link.dataset.select === 'all';
+        explorerForm.querySelectorAll(`input[name="${name}"]`).forEach(cb => { cb.checked = checked; });
+        scheduleSubmit(0);
+      });
+    });
+
+    const CHART_TOP_N = 10;
+    const topGroups = groupList.slice(0, CHART_TOP_N);
+    const restGroups = groupList.slice(CHART_TOP_N);
+
+    const datasets = topGroups.map((g, idx) => ({
+      label: g.name,
+      data: g.monthly,
+      backgroundColor: `hsl(${idx * 35}, 65%, 60%)`,
+      stack: 'spend',
+      groupId: g.id
+    }));
+
+    if (restGroups.length) {
+      datasets.push({
+        label: `Other (${restGroups.length} more)`,
+        data: monthLabels.map((_, i) => restGroups.reduce((sum, g) => sum + (g.monthly[i] || 0), 0)),
+        backgroundColor: '#9ca3af',
+        stack: 'spend',
+        groupId: null
+      });
+    }
+
+    new Chart(document.getElementById('explorerChart'), {
+      type: 'bar',
+      data: {
+        labels: monthLabels,
+        datasets: datasets
+      },
+      options: {
+        maintainAspectRatio: false,
+        animation: {
+          duration: 900,
+          easing: 'easeOutCubic'
+        },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: $${Number(ctx.raw || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              footer: (items) => {
+                const total = items.reduce((sum, item) => sum + (item.parsed.y || 0), 0);
+                return `Total: $${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            title: { display: true, text: 'Amount ($)' }
+          }
+        },
+        onClick: (evt, elements) => {
+          if (!elements.length) return;
+          const el = elements[0];
+          const dataset = datasets[el.datasetIndex];
+          if (!dataset.groupId) return;
+          const [barYear, barMonth] = monthYm[el.index];
+          const start = `${barYear}-${String(barMonth).padStart(2, '0')}-01`;
+          const lastDay = new Date(barYear, barMonth, 0).getDate();
+          const end = `${barYear}-${String(barMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+          const param = groupBy === 'source' ? 'source' : 'category';
+          window.location.href = `/?${param}=${dataset.groupId}&start_date=${start}&end_date=${end}`;
+        }
+      }
+    });
+  </script>
+{% endblock %}

@@ -2281,6 +2281,200 @@ def category_year_view(request):
     return render(request, "tracker/category_year.html", context)
 
 
+def cost_explorer_view(request):
+    """
+    AWS Cost Explorer-style breakdown of spend over a custom date range,
+    grouped by category or source, with multi-select category/source filters.
+    """
+    def shift_month(y, m, delta):
+        total = (y * 12) + (m - 1) + delta
+        return total // 12, (total % 12) + 1
+
+    def parse_date(value, fallback):
+        if not value:
+            return fallback
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            return fallback
+
+    today = datetime.now().date()
+
+    def months_ago_start(n):
+        y, m = shift_month(today.year, today.month, -n)
+        return date(y, m, 1)
+
+    RANGE_PRESETS = {
+        "7d": lambda: (today - timedelta(days=6), today),
+        "30d": lambda: (today - timedelta(days=29), today),
+        "mtd": lambda: (today.replace(day=1), today),
+        "3m": lambda: (months_ago_start(2), today),
+        "6m": lambda: (months_ago_start(5), today),
+        "ytd": lambda: (date(today.year, 1, 1), today),
+        "12m": lambda: (months_ago_start(11), today),
+        "last_year": lambda: (date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)),
+    }
+
+    range_preset = request.GET.get("range")
+    if range_preset is None:
+        # No explicit preset: treat bookmarked/linked start_date+end_date as custom,
+        # otherwise fall back to the default trailing-6-months view.
+        range_preset = "custom" if (request.GET.get("start_date") or request.GET.get("end_date")) else "6m"
+    if range_preset != "custom" and range_preset not in RANGE_PRESETS:
+        range_preset = "6m"
+
+    if range_preset == "custom":
+        default_start = months_ago_start(5)
+        start_date = parse_date(request.GET.get("start_date"), default_start)
+        end_date = parse_date(request.GET.get("end_date"), today)
+    else:
+        start_date, end_date = RANGE_PRESETS[range_preset]()
+
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    # Cap the range so a fat-fingered date pair can't blow up the chart/query.
+    months_span = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) + 1
+    if months_span > 60:
+        start_year, start_month = shift_month(end_date.year, end_date.month, -59)
+        start_date = date(start_year, start_month, 1)
+
+    group_by = request.GET.get("group_by", "category")
+    if group_by not in {"category", "source"}:
+        group_by = "category"
+
+    all_categories = list(Category.objects.all().order_by("name"))
+    all_sources = list(Source.objects.all().order_by("name"))
+
+    # Everything starts selected. The form always posts `filtered=1`, so a
+    # submitted form with nothing checked means "match nothing" rather than
+    # "no filter"; a bare visit (no `filtered`) means all selected.
+    if request.GET.get("filtered") == "1":
+        category_ids = [int(v) for v in request.GET.getlist("category") if v.isdigit()]
+        source_ids = [int(v) for v in request.GET.getlist("source") if v.isdigit()]
+    else:
+        category_ids = [c.id for c in all_categories]
+        source_ids = [s.id for s in all_sources]
+
+    # Spend in the date range before the category/source filters are applied.
+    # The filter checklists are ordered from this so their order stays put
+    # while boxes are ticked and unticked.
+    base_transactions = annotate_net_amount(
+        Transaction.objects.filter(date__gte=start_date, date__lte=end_date)
+    ).exclude(category__name__iexact="income").exclude(
+        category__reporting_category__name__iexact="income"
+    ).exclude(CREDIT_CATEGORY_Q)
+
+    direct_by_category = {
+        r["category_id"]: float(r["total"] or 0) * -1
+        for r in base_transactions.values("category_id").annotate(total=Sum("net_amount"))
+    }
+    # A category's total matches what ticking it filters on: its own spend plus
+    # that of any categories rolled up under it.
+    category_totals = {c.id: direct_by_category.get(c.id, 0.0) for c in all_categories}
+    for c in all_categories:
+        if c.reporting_category_id in category_totals:
+            category_totals[c.reporting_category_id] += direct_by_category.get(c.id, 0.0)
+    source_totals = {
+        r["source_id"]: float(r["total"] or 0) * -1
+        for r in base_transactions.values("source_id").annotate(total=Sum("net_amount"))
+    }
+    # Stable sort on top of the name ordering: ties and zero-spend entries stay alphabetical.
+    all_categories.sort(key=lambda c: -category_totals.get(c.id, 0.0))
+    all_sources.sort(key=lambda s: -source_totals.get(s.id, 0.0))
+
+    transactions = base_transactions
+
+    # Skip a filter when everything is selected so uncategorized / no-source
+    # transactions aren't dropped by a no-op `__in`.
+    if len(set(category_ids)) < len(all_categories):
+        transactions = transactions.filter(
+            Q(category_id__in=category_ids) | Q(category__reporting_category_id__in=category_ids)
+        )
+    if len(set(source_ids)) < len(all_sources):
+        transactions = transactions.filter(source_id__in=source_ids)
+
+    transactions = transactions.annotate(month=ExtractMonth("date"), year=ExtractYear("date"))
+
+    if group_by == "source":
+        rows = (
+            transactions.values("source_id", "source__name", "year", "month")
+            .annotate(total=Sum("net_amount"))
+        )
+        rows = [
+            {
+                "group_id": r["source_id"],
+                "group_name": r["source__name"] or "(No Source)",
+                "year": r["year"],
+                "month": r["month"],
+                "total": r["total"],
+            }
+            for r in rows
+        ]
+    else:
+        rows = (
+            annotate_reporting_category(transactions)
+            .values("reporting_category_id", "reporting_category_name", "year", "month")
+            .annotate(total=Sum("net_amount"))
+        )
+        rows = [
+            {
+                "group_id": r["reporting_category_id"],
+                "group_name": r["reporting_category_name"] or "(Uncategorized)",
+                "year": r["year"],
+                "month": r["month"],
+                "total": r["total"],
+            }
+            for r in rows
+        ]
+
+    months = []
+    y, m = start_date.year, start_date.month
+    while (y, m) <= (end_date.year, end_date.month):
+        months.append((y, m))
+        y, m = shift_month(y, m, 1)
+    month_index = {ym: idx for idx, ym in enumerate(months)}
+    month_labels = [f"{calendar.month_abbr[m]} '{str(y)[-2:]}" for y, m in months]
+
+    groups = {}
+    for row in rows:
+        key = row["group_id"]
+        if key not in groups:
+            groups[key] = {
+                "id": key,
+                "name": row["group_name"],
+                "monthly": [0.0] * len(months),
+                "total": 0.0,
+            }
+        idx = month_index.get((row["year"], row["month"]))
+        if idx is None:
+            continue
+        amount = float(row["total"] or 0) * -1
+        groups[key]["monthly"][idx] = amount
+        groups[key]["total"] += amount
+
+    group_list = sorted(groups.values(), key=lambda g: g["total"], reverse=True)
+    grand_total = sum(g["total"] for g in group_list)
+    for g in group_list:
+        g["percent"] = (g["total"] / grand_total * 100) if grand_total else 0
+
+    context = {
+        "month_labels": month_labels,
+        "month_ym": [[y, m] for y, m in months],
+        "group_list": group_list,
+        "group_by": group_by,
+        "grand_total": grand_total,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "range_preset": range_preset,
+        "all_categories": all_categories,
+        "all_sources": all_sources,
+        "selected_category_ids": category_ids,
+        "selected_source_ids": source_ids,
+    }
+    return render(request, "tracker/cost_explorer.html", context)
+
+
 def goals_view(request):
     goals = SavingsGoal.objects.filter(is_active=True)
     if not goals.exists():

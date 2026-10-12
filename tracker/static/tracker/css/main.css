@@ -248,3 +248,71 @@ body.app-body {
 .table-hover > tbody > tr:hover > * {
   background-color: #f0f0f0;
 }
+
+.explorer-layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.explorer-filters {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 24px;
+}
+
+.explorer-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-section {
+  margin-bottom: 18px;
+}
+
+.filter-section label.section-label {
+  display: block;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.filter-checklist {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.filter-checklist .form-check {
+  margin-bottom: 4px;
+}
+
+.filter-checklist .form-check-label {
+  font-size: 14px;
+}
+
+@media (max-width: 860px) {
+  .explorer-layout {
+    flex-direction: column;
+  }
+
+  .explorer-filters {
+    width: 100%;
+    position: static;
+  }
+}
+
+.select-toggles a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.select-toggles a:hover {
+  text-decoration: underline;
+}
