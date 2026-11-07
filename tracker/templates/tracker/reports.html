@@ -113,7 +113,7 @@
       const avgTrend = {{ avg_trend|safe }};
       const hasAvgTrend = {{ has_avg_trend|yesno:"true,false" }};
       const trendLookback = {{ trend_lookback }};
-      const dayLabels = Array.from({length: 31}, (_, i) => i + 1);
+      const dayLabels = Array.from({length: 32}, (_, i) => i);
       const categories = pieData.map(e => e.category__name);
       const totals = pieData.map(e => e.total);
       const spendVsIncomeLabels = ['Income', 'Spend'];
@@ -204,14 +204,16 @@
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
           plugins: {
             legend: { position: 'top' },
             title: { display: true, text: 'Cumulative Spend Over Month' },
             tooltip: {
+              filter: (item) => item.raw !== null && item.raw !== undefined,
               callbacks: {
+                title: (items) => items.length ? `Day ${items[0].label}` : '',
                 label: function(context) {
                   const val = context.raw;
-                  if (val === null) return null;
                   return `${context.dataset.label}: $${val.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
                 }
               }

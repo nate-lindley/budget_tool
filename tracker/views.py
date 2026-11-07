@@ -1,7 +1,7 @@
 from django.shortcuts import render, HttpResponseRedirect
 from django.contrib import messages
 from .models import *
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, date
 from django.db.models import Sum, Q, Exists, OuterRef, Min, Max, F, Value, DecimalField, Case, When, BooleanField
 import calendar
@@ -72,7 +72,10 @@ def get_monthly_cumulative_spend(year, month):
     for day in range(1, 32):
         if day in day_cumulative:
             last_val = day_cumulative[day]
+            # print(f'day: {day}, last_val: {last_val}')
         result.append(last_val)
+
+    # print(result)
     return result
 
 
@@ -350,22 +353,21 @@ def add_transaction(request):
         source = None
     
     # implement math logic for transaction amount
-    amount = 0
+    amount = Decimal('0')
     if request.POST['amount']:
         try:
-            amount = float(request.POST['amount'])
-            print(f'Requested amount: {request.POST["amount"]}, Parsed amount: {amount}')
-        except ValueError:
+            amount = Decimal(request.POST['amount'])
+        except InvalidOperation:
             # Handle invalid amount input
             print("Invalid amount value")
             return HttpResponseRedirect("/")
 
-    reimbursement = 0
+    reimbursement = Decimal('0')
     reimbursement_value = request.POST.get('reimbursement')
     if reimbursement_value:
         try:
-            reimbursement = float(reimbursement_value)
-        except ValueError:
+            reimbursement = Decimal(reimbursement_value)
+        except InvalidOperation:
             print("Invalid reimbursement value")
             return HttpResponseRedirect("/")
 
@@ -373,7 +375,7 @@ def add_transaction(request):
         description=request.POST['description'],
         amount=amount,
         reimbursement=reimbursement,
-        date=request.POST['date'],
+        date=datetime.strptime(request.POST['date'], '%Y-%m-%d').date(),
         category=category,
         source=source,
         tags=request.POST.get('tags', '').strip(),
@@ -1053,9 +1055,9 @@ def edit_transaction(request, transaction_id):
             transaction.description = request.POST['description']
         if 'amount' in request.POST and request.POST['amount']:
             try:
-                amount = float(request.POST['amount'])
+                amount = Decimal(request.POST['amount'])
                 transaction.amount = amount  # Update the transaction amount
-            except ValueError:
+            except InvalidOperation:
             # Handle invalid amount input
                 print(f"Invalid amount value {request.POST['amount']}")
                 return HttpResponseRedirect("/")
@@ -1065,9 +1067,9 @@ def edit_transaction(request, transaction_id):
                 transaction.reimbursement = 0
             else:
                 try:
-                    reimbursement = float(reimbursement_value)
+                    reimbursement = Decimal(reimbursement_value)
                     transaction.reimbursement = reimbursement
-                except ValueError:
+                except InvalidOperation:
                     print(f"Invalid reimbursement value {request.POST['reimbursement']}")
                     return HttpResponseRedirect("/")
         if 'date' in request.POST and is_valid_date(request.POST['date']):
@@ -1206,31 +1208,24 @@ def reports_view(request):
             .annotate(daily_total=Sum("net_amount"))
         )
         cumulative_total = 0
-        line_data = [{"date": datetime(year, month, 1).strftime("%Y-%m-%d"), "cumulative": 0}]
-        dates = {}
+        daily_cumulative = {}
         for item in daily_totals:
             cumulative_total += item["daily_total"] * -1
-            line_data.append({"date": item["date"].strftime("%Y-%m-%d"), "cumulative": float(cumulative_total)})
-            dates[item["date"].isoformat()] = True
+            daily_cumulative[item["date"]] = float(cumulative_total)
 
-        new_line_data = []
-        for data in line_data:
-            tomorrow = datetime.strptime(data['date'], '%Y-%m-%d') + timedelta(days=1)
-            first_of_next_month = datetime(year, month+1, 1) if month < 12 else datetime(year+1, 1, 1)
-            while (tomorrow.strftime('%Y-%m-%d') not in dates) and tomorrow < first_of_next_month:
-                new_line_data.append({"date": tomorrow.strftime('%Y-%m-%d'), 'cumulative': data['cumulative']})
-                dates[tomorrow.isoformat()] = True
-                tomorrow = tomorrow + timedelta(days=1)
+        first_of_month = datetime(year, month, 1).date()
+        first_of_next_month = (
+            datetime(year, month + 1, 1) if month < 12 else datetime(year + 1, 1, 1)
+        ).date()
 
-        ld_idx = nld_idx = 0
         final_line_data = []
-        while len(final_line_data) < (len(line_data) + len(new_line_data)):
-            if nld_idx >= len(new_line_data) or (ld_idx < len(line_data) and line_data[ld_idx]['date'] < new_line_data[nld_idx]['date']):
-                final_line_data.append(line_data[ld_idx])
-                ld_idx += 1
-            else:
-                final_line_data.append(new_line_data[nld_idx])
-                nld_idx += 1
+        last_val = 0.0
+        current = first_of_month
+        while current < first_of_next_month:
+            if current in daily_cumulative:
+                last_val = daily_cumulative[current]
+            final_line_data.append({"date": current.strftime("%Y-%m-%d"), "cumulative": last_val})
+            current += timedelta(days=1)
 
     total_spent = float(sum([x["total"] for x in pie_data]))
 
@@ -1313,17 +1308,20 @@ def reports_view(request):
         key=lambda item: (item.get("category__name") or "").lower(),
     )
 
-    # Convert line chart data to JSON-safe format (day-of-month indexed)
-    line_data_safe = [
+    # Convert line chart data to JSON-safe format (day-of-month indexed),
+    # with a leading day-0 zero point so the line starts at the origin
+    line_data_safe = [{"date": 0, "cumulative": 0.0}] + [
         {"date": i + 1, "cumulative": float(final_line_data[i]["cumulative"])}
         for i in range(len(final_line_data))
     ]
 
-    # Pad completed past months to 31 days so the x-axis aligns with the avg trend line
+    # Pad completed past months to 31 days (+1 for the leading day-0 point)
+    # so the x-axis aligns with the avg trend line
     is_current_month = (year == datetime.today().year and month == datetime.today().month)
-    if not is_current_month and len(line_data_safe) < 31:
+    if not is_current_month and len(line_data_safe) < 32:
         last_val = line_data_safe[-1]["cumulative"] if line_data_safe else 0
-        for extra_day in range(len(line_data_safe) + 1, 32):
+        next_date = (line_data_safe[-1]["date"] + 1) if line_data_safe else 1
+        for extra_day in range(next_date, 32):
             line_data_safe.append({"date": extra_day, "cumulative": last_val})
 
     # Compute average cumulative spend trend over past SPEND_TREND_LOOKBACK_MONTHS months
@@ -1342,7 +1340,7 @@ def reports_view(request):
             months_with_data += 1
 
     has_avg_trend = months_with_data > 0
-    avg_trend = [round(v / months_with_data, 2) for v in avg_trend_values] if has_avg_trend else []
+    avg_trend = [0.0] + [round(v / months_with_data, 2) for v in avg_trend_values] if has_avg_trend else []
 
     if not month_data:
         # print(final_line_data)
